@@ -1,0 +1,33 @@
+﻿<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        @if (!Collapsed)
+        {
+            <a class="navbar-brand" href="">ProjectManagementApp</a>
+        }
+        else
+        {
+            <a class="navbar-brand collapsed-brand" href="" title="ProjectManagementApp">PM</a>
+        }
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable @(Collapsed ? "collapsed" : "")" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="nav flex-column">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All" title="Home">
+                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span>
+                @if (!Collapsed)
+                {
+                    <span class="nav-text">Home</span>
+                }
+            </NavLink>
+        </div>
+    </nav>
+</div>
+
+@code {
+    [Parameter]
+    public bool Collapsed { get; set; } = false;
+}

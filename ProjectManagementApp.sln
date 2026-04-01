@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProjectManagementApp", "ProjectManagementApp.csproj", "{BF238F93-9C8E-E0BF-B176-FDFF3DFDBE50}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProjectManagementApp.Tests", "ProjectManagementApp.Tests\ProjectManagementApp.Tests.csproj", "{957E3407-6281-EEFE-0DDA-C0C329C005EC}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{BF238F93-9C8E-E0BF-B176-FDFF3DFDBE50}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BF238F93-9C8E-E0BF-B176-FDFF3DFDBE50}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BF238F93-9C8E-E0BF-B176-FDFF3DFDBE50}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BF238F93-9C8E-E0BF-B176-FDFF3DFDBE50}.Release|Any CPU.Build.0 = Release|Any CPU
+		{957E3407-6281-EEFE-0DDA-C0C329C005EC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{957E3407-6281-EEFE-0DDA-C0C329C005EC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{957E3407-6281-EEFE-0DDA-C0C329C005EC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{957E3407-6281-EEFE-0DDA-C0C329C005EC}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {F884F02E-6311-43B0-802F-19B398295AF2}
+	EndGlobalSection
+EndGlobal

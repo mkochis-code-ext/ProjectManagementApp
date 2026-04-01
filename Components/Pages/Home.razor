@@ -1,0 +1,2426 @@
+@page "/"
+@using ProjectManagementApp.Models
+@using ProjectManagementApp.Services
+@inject BoardService BoardService
+@rendermode InteractiveServer
+
+<PageTitle>@(board?.Name ?? "Board Manager")</PageTitle>
+
+<div class="app-layout">
+    <aside class="todo-sidebar">
+        <div class="sidebar-header">
+            <h2>@(showCompletedTodos ? "All" : "Active") @(board?.TodoLabel ?? "Todo")s</h2>
+            <span class="todo-count">@GetSidebarTodos().Count()</span>
+        </div>
+        <div class="sidebar-actions">
+            <button class="btn-add-quick-todo" @onclick="ShowQuickAddTodoPanel" disabled="@(board == null)" title="Add @(board?.TodoLabel ?? "Todo")">
+                + Add @(board?.TodoLabel ?? "Todo")
+            </button>
+        </div>
+        <div class="sidebar-toggle">
+            <label class="show-completed-todos">
+                <input type="checkbox" @bind="showCompletedTodos" />
+                Show Completed
+            </label>
+        </div>
+        <div class="sidebar-todos">
+            @foreach (var todoInfo in GetSidebarTodos())
+            {
+                <div @key="todoInfo.Todo.Id" class="sidebar-todo-item @(todoInfo.Todo.IsCompleted ? "completed" : "") @(todoInfo.IsBoardLevel ? "board-level" : "")" 
+                     title="@(todoInfo.IsBoardLevel ? "Board-level " + (board?.TodoLabel ?? "Todo") : (board?.LaneLabel ?? "Lane") + ": " + todoInfo.LaneName + "\n" + (board?.CardLabel ?? "Card") + ": " + todoInfo.CardTitle)">
+                    <input type="checkbox" checked="@todoInfo.Todo.IsCompleted" 
+                           @onchange="() => ToggleSidebarTodo(todoInfo)" />
+                    <div class="sidebar-todo-content">
+                        <span class="sidebar-todo-text">@todoInfo.Todo.Text</span>
+                        @if (todoInfo.IsBoardLevel)
+                        {
+                            <span class="sidebar-todo-context board-context">📋 Board</span>
+                        }
+                        else
+                        {
+                            <span class="sidebar-todo-context">@todoInfo.LaneName › @todoInfo.CardTitle</span>
+                        }
+                    </div>
+                </div>
+            }
+            @if (!GetSidebarTodos().Any())
+            {
+                <div class="sidebar-empty">
+                    <span>No @(showCompletedTodos ? "" : "active ")@(board?.TodoLabel?.ToLower() ?? "todo")s</span>
+                </div>
+            }
+        </div>
+    </aside>
+    <div class="kanban-container">
+        <div class="info-banner">
+            <span class="info-icon">ℹ</span>
+            <span>Your boards are saved to: <strong>@dataFilePath</strong></span>
+            <button class="btn-backup" @onclick="BackupData" title="Create backup">
+                <span>📋</span> Backup
+            </button>
+            @if (!string.IsNullOrEmpty(backupMessage))
+            {
+                <span class="backup-message @(backupSuccess ? "success" : "error")">@backupMessage</span>
+            }
+        </div>
+        <div class="kanban-header">
+        <div class="board-title-section">
+            @if (editingBoardName)
+            {
+                <div class="board-name-edit">
+                    <input type="text" @bind="newBoardName" @onkeyup="HandleBoardNameKeyPress" class="board-name-input" />
+                    <button class="btn-icon" @onclick="SaveBoardName">✓</button>
+                    <button class="btn-icon" @onclick="CancelBoardNameEdit">✕</button>
+                </div>
+            }
+            else
+            {
+                <h1 @onclick="StartEditBoardName" class="board-name-clickable">@(board?.Name ?? "Select or Create a Board")</h1>
+            }
+            <div class="board-selector">
+                <select @onchange="OnBoardSelected" class="board-dropdown">
+                    @foreach (var b in allBoards)
+                    {
+                        <option value="@b.Id" selected="@(b.Id == board?.Id)">@b.Name</option>
+                    }
+                </select>
+                <button class="btn-icon" @onclick="ShowNewBoardPanel" title="New Board">+</button>
+                @if (board != null)
+                {
+                    <button class="btn-icon" @onclick="ShowEditBoardPanel" title="Board Settings">⚙</button>
+                    <button class="btn-icon btn-delete" @onclick="DeleteCurrentBoard" title="Delete Board">🗑</button>
+                }
+            </div>
+        </div>
+        <div class="header-controls">
+            <label class="show-completed">
+                <input type="checkbox" @bind="showCompleted" />
+                Show Completed @(board?.CardLabel ?? "Card")
+            </label>
+            <button class="btn-collapse-all" @onclick="ToggleCollapseAll" disabled="@(board == null || !board.Lanes.Any(l => l.Cards.Any()))" title="@(AreAllCardsCollapsed() ? "Expand All" : "Collapse All")">
+                <span class="collapse-all-icon @(AreAllCardsCollapsed() ? "collapsed" : "")">▼</span>
+                @(AreAllCardsCollapsed() ? "Expand All" : "Collapse All")
+            </button>
+            @if (!showLanePanel && board != null)
+            {
+                <button class="btn-add-swimlane" @onclick="ShowAddLanePanel">+ Add @(board?.LaneLabel ?? "Lane")</button>
+            }
+        </div>
+    </div>
+
+    @* New Board Modal *@
+    @if (showNewBoardPanel)
+    {
+        <div class="modal-backdrop" @onclick="CloseNewBoardPanel"></div>
+        <div class="modal-dialog" @onkeydown="HandleNewBoardModalKeyDown">
+            <div class="modal-content">
+                <h3>Create New Board</h3>
+                <input @ref="newBoardNameInput" type="text" placeholder="Board Name" @bind="createBoardName" @bind:event="oninput" class="modal-input" />
+                @if (showNewBoardValidation && string.IsNullOrWhiteSpace(createBoardName))
+                {
+                    <span class="validation-error">Board name is required</span>
+                }
+                <input type="text" placeholder="Lane Label (e.g., Customer, Category, Status)" @bind="createBoardLaneLabel" class="modal-input" />
+                <input type="text" placeholder="Card Label (e.g., Project, Task, Item)" @bind="createBoardCardLabel" class="modal-input" />
+                <input type="text" placeholder="Todo Label (e.g., Todo, Subtask, Checklist Item)" @bind="createBoardTodoLabel" class="modal-input" />
+                <div class="modal-buttons">
+                    <button type="button" class="btn-cancel" @onclick="CloseNewBoardPanel">Cancel</button>
+                    <button type="button" class="btn-save" @onclick="CreateNewBoard">Create Board</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* Edit Board Modal *@
+    @if (showEditBoardPanel)
+    {
+        <div class="modal-backdrop" @onclick="CloseEditBoardPanel"></div>
+        <div class="modal-dialog" @onkeydown="HandleEditBoardModalKeyDown">
+            <div class="modal-content">
+                <h3>Board Settings</h3>
+                <input @ref="editBoardNameInput" type="text" placeholder="Board Name" @bind="editBoardName" @bind:event="oninput" class="modal-input" />
+                @if (showEditBoardValidation && string.IsNullOrWhiteSpace(editBoardName))
+                {
+                    <span class="validation-error">Board name is required</span>
+                }
+                <input type="text" placeholder="Lane Label" @bind="editBoardLaneLabel" class="modal-input" />
+                <input type="text" placeholder="Card Label" @bind="editBoardCardLabel" class="modal-input" />
+                <input type="text" placeholder="Todo Label" @bind="editBoardTodoLabel" class="modal-input" />
+                <div class="modal-buttons">
+                    <button type="button" class="btn-cancel" @onclick="CloseEditBoardPanel">Cancel</button>
+                    <button type="button" class="btn-save" @onclick="SaveBoardSettings">Save Settings</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* Lane Modal *@
+    @if (showLanePanel)
+    {
+        <div class="modal-backdrop" @onclick="CloseAddLanePanel"></div>
+        <div class="modal-dialog" @onkeydown="HandleLaneModalKeyDown">
+            <div class="modal-content">
+                <h3>Add New @(board?.LaneLabel ?? "Lane")</h3>
+                <input @ref="laneNameInput" type="text" placeholder="@(board?.LaneLabel ?? "Lane") Name" @bind="newLaneName" @bind:event="oninput" class="modal-input" />
+                @if (showLaneValidation && string.IsNullOrWhiteSpace(newLaneName))
+                {
+                    <span class="validation-error">@(board?.LaneLabel ?? "Lane") name is required</span>
+                }
+                <div class="modal-buttons">
+                    <button type="button" class="btn-cancel" @onclick="CloseAddLanePanel">Cancel</button>
+                    <button type="button" class="btn-save" @onclick="AddLane">Add @(board?.LaneLabel ?? "Lane")</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* Card Modal *@
+    @if (showCardPanel)
+    {
+        <div class="modal-backdrop" @onclick="CloseCardPanel"></div>
+        <div class="modal-dialog" @onkeydown="HandleCardModalKeyDown">
+            <div class="modal-content">
+                <h3>@(editingCard != null ? "Edit" : "Add New") @(board?.CardLabel ?? "Card") - @currentLaneName</h3>
+                <input @ref="cardTitleInput" type="text" placeholder="@(board?.CardLabel ?? "Card") Title" @bind="newCardTitle" @bind:event="oninput" class="modal-input" />
+                @if (showCardValidation && string.IsNullOrWhiteSpace(newCardTitle))
+                {
+                    <span class="validation-error">@(board?.CardLabel ?? "Card") title is required</span>
+                }
+                <textarea placeholder="Description (optional)" @bind="newCardDescription" class="modal-textarea"></textarea>
+                <div class="modal-buttons">
+                    <button type="button" class="btn-cancel" @onclick="CloseCardPanel">Cancel</button>
+                    <button type="button" class="btn-save" @onclick="SaveCard">@(editingCard != null ? "Save" : "Add") @(board?.CardLabel ?? "Card")</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* Quick Add Todo Modal *@
+    @if (showQuickAddTodoPanel)
+    {
+        <div class="modal-backdrop" @onclick="CloseQuickAddTodoPanel"></div>
+        <div class="modal-dialog" @onkeydown="HandleQuickAddTodoKeyDown">
+            <div class="modal-content">
+                <h3>Add New @(board?.TodoLabel ?? "Todo")</h3>
+                <div class="form-group">
+                    <label>@(board?.LaneLabel ?? "Lane") <span class="optional-label">(optional)</span></label>
+                    <select @bind="quickTodoLaneId" class="modal-select" @bind:after="OnQuickTodoLaneChanged">
+                        <option value="">Select @(board?.LaneLabel ?? "Lane")...</option>
+                        @if (board != null)
+                        {
+                            @foreach (var lane in board.Lanes.Where(l => l.Cards.Any()).OrderBy(l => l.Order))
+                            {
+                                <option value="@lane.Id">@lane.Name</option>
+                            }
+                        }
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>@(board?.CardLabel ?? "Card") <span class="optional-label">(optional)</span></label>
+                    <select @bind="quickTodoCardId" class="modal-select" disabled="@(quickTodoLaneId == Guid.Empty)">
+                        <option value="">Select @(board?.CardLabel ?? "Card")...</option>
+                        @if (board != null && quickTodoLaneId != Guid.Empty)
+                        {
+                            @foreach (var card in board.Lanes.FirstOrDefault(l => l.Id == quickTodoLaneId)?.Cards.OrderBy(c => c.Order) ?? Enumerable.Empty<Card>())
+                            {
+                                <option value="@card.Id">@card.Title</option>
+                            }
+                        }
+                    </select>
+                </div>
+                <input @ref="quickTodoTextInput" type="text" placeholder="@(board?.TodoLabel ?? "Todo") text" @bind="quickTodoText" @bind:event="oninput" class="modal-input" />
+                @if (showQuickTodoValidation && string.IsNullOrWhiteSpace(quickTodoText))
+                {
+                    <span class="validation-error">@(board?.TodoLabel ?? "Todo") text is required</span>
+                }
+                @if (showQuickTodoValidation && IsPartialSelection())
+                {
+                    <span class="validation-error">Please select both a @(board?.LaneLabel ?? "Lane") and @(board?.CardLabel ?? "Card"), or leave both empty for a board-level @(board?.TodoLabel?.ToLower() ?? "todo")</span>
+                }
+                <p class="modal-info @(IsBoardLevelTodo() ? "board-level-info" : "card-level-info")">
+                    @if (IsBoardLevelTodo())
+                    {
+                        <span>📋 This @(board?.TodoLabel?.ToLower() ?? "todo") will be added to the <strong>board</strong></span>
+                    }
+                    else
+                    {
+                        <span>📝 This @(board?.TodoLabel?.ToLower() ?? "todo") will be added to <strong>@GetSelectedCardName()</strong></span>
+                    }
+                </p>
+                <div class="modal-buttons">
+                    <button type="button" class="btn-cancel" @onclick="CloseQuickAddTodoPanel">Cancel</button>
+                    <button type="button" class="btn-save" @onclick="AddQuickTodo">Add @(board?.TodoLabel ?? "Todo")</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (board != null)
+    {
+        <div class="kanban-board">
+            @foreach (var lane in board.Lanes.OrderBy(l => l.Order))
+            {
+                <div class="swimlane">
+                    <div class="swimlane-header">
+                        @if (editingLaneId == lane.Id)
+                        {
+                            <input type="text" @bind="editingLaneName" @onkeyup="e => HandleLaneEditKeyPress(e, lane.Id)" class="edit-input" />
+                            <button class="btn-icon" @onclick="() => SaveLaneEdit(lane.Id)">✓</button>
+                            <button class="btn-icon" @onclick="CancelLaneEdit">✕</button>
+                        }
+                        else
+                        {
+                            <h3>@lane.Name</h3>
+                            <div class="swimlane-actions">
+                                <button class="btn-icon" @onclick="() => StartEditLane(lane)">✎</button>
+                                <button class="btn-icon btn-delete" @onclick="() => DeleteLane(lane.Id)">🗑</button>
+                            </div>
+                        }
+                    </div>
+                    <div class="swimlane-tasks">
+                        @foreach (var card in lane.Cards.Where(c => showCompleted || !c.IsCompleted).OrderBy(c => c.IsCompleted).ThenBy(c => c.Order))
+                        {
+                            <div class="task-card @(card.IsCompleted ? "completed" : "") @(IsCardCollapsed(card.Id) ? "collapsed" : "")" draggable="true"
+                                 @ondragstart="() => StartDrag(lane.Id, card)"
+                                 @ondragover:preventDefault
+                                 @ondrop="() => Drop(lane.Id)">
+                                <div class="task-header">
+                                    <button class="btn-collapse" @onclick="() => ToggleCardCollapse(card.Id)" @onclick:stopPropagation="true" title="@(IsCardCollapsed(card.Id) ? "Expand" : "Collapse")">
+                                        <span class="collapse-icon @(IsCardCollapsed(card.Id) ? "collapsed" : "")">▼</span>
+                                    </button>
+                                    <span class="task-title">@card.Title</span>
+                                    @if (IsCardCollapsed(card.Id))
+                                    {
+                                        <span class="collapsed-summary">
+                                            @if (card.Todos.Any())
+                                            {
+                                                <span class="todo-badge">@card.Todos.Count(t => t.IsCompleted)/@card.Todos.Count</span>
+                                            }
+                                        </span>
+                                    }
+                                </div>
+                                @if (!IsCardCollapsed(card.Id))
+                                {
+                                    @if (!string.IsNullOrEmpty(card.Description))
+                                    {
+                                        <p class="task-description">@card.Description</p>
+                                    }
+                                    @if (card.Todos.Any())
+                                    {
+                                        <div class="todo-list">
+                                            <div class="todo-header">
+                                                <span>@(board?.TodoLabel ?? "Todo")s (@card.Todos.Count(t => t.IsCompleted)/@card.Todos.Count)</span>
+                                            </div>
+                                            @foreach (var todo in card.Todos.OrderBy(t => t.Order))
+                                            {
+                                                <div class="todo-item @(todo.IsCompleted ? "completed" : "")">
+                                                    <input type="checkbox" checked="@todo.IsCompleted" 
+                                                           @onchange="() => ToggleTodo(lane.Id, card.Id, todo)" />
+                                                    <span class="todo-text">@todo.Text</span>
+                                                    <button class="btn-icon btn-todo-delete" @onclick="() => DeleteTodo(lane.Id, card.Id, todo.Id)" @onclick:stopPropagation="true">×</button>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                    <div class="add-todo-inline">
+                                        @if (addingTodoForCardId == card.Id)
+                                        {
+                                            <input type="text" @bind="newTodoText" @bind:event="oninput" 
+                                                   @onkeydown="e => HandleTodoKeyDown(e, lane.Id, card.Id)"
+                                                   placeholder="@(board?.TodoLabel ?? "Todo") text..." 
+                                                   class="todo-input" />
+                                            <button class="btn-icon" @onclick="() => AddTodo(lane.Id, card.Id)">✓</button>
+                                            <button class="btn-icon" @onclick="CancelAddTodo">✕</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn-add-todo" @onclick="() => StartAddTodo(card.Id)" @onclick:stopPropagation="true">+ @(board?.TodoLabel ?? "Todo")</button>
+                                        }
+                                    </div>
+                                    @* Notes Section *@
+                                    <div class="card-notes-section">
+                                        <div class="notes-header" @onclick="() => ToggleNotesExpand(card.Id)" @onclick:stopPropagation="true">
+                                            <span class="notes-icon">📝</span>
+                                            <span>Notes</span>
+                                            @if (!string.IsNullOrWhiteSpace(card.Notes))
+                                            {
+                                                <span class="notes-indicator">•</span>
+                                            }
+                                            <span class="expand-icon @(IsNotesExpanded(card.Id) ? "expanded" : "")">▶</span>
+                                        </div>
+                                        @if (IsNotesExpanded(card.Id))
+                                        {
+                                            <textarea class="notes-textarea" 
+                                                      placeholder="Add notes..."
+                                                      value="@card.Notes"
+                                                      @oninput="e => OnNotesInput(card.Id, e)"
+                                                      @onblur="() => SaveNotes(lane.Id, card.Id)"
+                                                      @onclick:stopPropagation="true"></textarea>
+                                        }
+                                    </div>
+                                    @* Links Section *@
+                                    <div class="card-links-section">
+                                        <div class="links-header" @onclick="() => ToggleLinksExpand(card.Id)" @onclick:stopPropagation="true">
+                                            <span class="links-icon">🔗</span>
+                                            <span>Links</span>
+                                            @if (card.Links.Any())
+                                            {
+                                                <span class="links-count">(@card.Links.Count)</span>
+                                            }
+                                            <span class="expand-icon @(IsLinksExpanded(card.Id) ? "expanded" : "")">▶</span>
+                                        </div>
+                                        @if (IsLinksExpanded(card.Id))
+                                        {
+                                            <div class="links-content">
+                                                @foreach (var link in card.Links)
+                                                {
+                                                    <div class="link-item">
+                                                        <a href="@link.Url" target="_blank" rel="noopener noreferrer" @onclick:stopPropagation="true">@(string.IsNullOrWhiteSpace(link.Title) ? link.Url : link.Title)</a>
+                                                        <button class="btn-icon btn-link-delete" @onclick="() => DeleteLink(lane.Id, card.Id, link.Id)" @onclick:stopPropagation="true">×</button>
+                                                    </div>
+                                                }
+                                                @if (addingLinkForCardId == card.Id)
+                                                {
+                                                    <div class="add-link-form">
+                                                        <input type="text" @bind="newLinkTitle" placeholder="Link title (optional)" class="link-input" @onclick:stopPropagation="true" />
+                                                        <input type="text" @bind="newLinkUrl" placeholder="URL" class="link-input" @onkeydown="e => HandleLinkKeyDown(e, lane.Id, card.Id)" @onclick:stopPropagation="true" />
+                                                        <div class="link-form-actions">
+                                                            <button class="btn-icon" @onclick="() => AddLink(lane.Id, card.Id)" @onclick:stopPropagation="true">✓</button>
+                                                            <button class="btn-icon" @onclick="CancelAddLink" @onclick:stopPropagation="true">✕</button>
+                                                        </div>
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    <button class="btn-add-link" @onclick="() => StartAddLink(card.Id)" @onclick:stopPropagation="true">+ Add Link</button>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                    <div class="task-meta">
+                                        <small>Created: @card.CreatedAt.ToLocalTime().ToString("g")</small>
+                                        @if (card.CompletedAt.HasValue)
+                                        {
+                                            <small>Completed: @card.CompletedAt.Value.ToLocalTime().ToString("g")</small>
+                                        }
+                                    </div>
+                                    <div class="task-actions">
+                                        <button class="btn-icon" @onclick="() => ShowEditCardPanel(lane.Id, card)">✎</button>
+                                        @if (card.IsCompleted)
+                                        {
+                                            <button class="btn-icon btn-reactivate" @onclick="() => ReactivateCard(lane.Id, card.Id)" title="Reactivate">↺</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn-icon btn-complete" @onclick="() => CompleteCard(lane.Id, card.Id)" title="Mark Complete">✓</button>
+                                        }
+                                        <button class="btn-icon btn-delete" @onclick="() => DeleteCard(lane.Id, card.Id)">🗑</button>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                    <button class="btn-add-task" @onclick="() => ShowAddCardPanel(lane.Id)">+ Add @(board?.CardLabel ?? "Card")</button>
+                </div>
+            }
+        </div>
+    }
+    else if (allBoards.Count == 0)
+    {
+        <div class="empty-state">
+            <p>No boards yet. Create your first board to get started!</p>
+            <button class="btn-add-swimlane" @onclick="ShowNewBoardPanel">+ Create Board</button>
+        </div>
+    }
+</div>
+</div>
+
+<style>
+    /* CSS Variables - Dark mode as default */
+    :root {
+        --bg-primary: #1a1d23;
+        --bg-secondary: #252a33;
+        --bg-tertiary: #2d333b;
+        --bg-card: #323842;
+        --bg-card-completed: #282d35;
+        --bg-hover: #3d434d;
+        --text-primary: #e6edf3;
+        --text-secondary: #8b949e;
+        --text-muted: #6e7681;
+        --border-color: #444c56;
+        --border-light: #373e47;
+        --accent-primary: #58a6ff;
+        --accent-hover: #79b8ff;
+        --btn-cancel-bg: #373e47;
+        --btn-cancel-hover: #444c56;
+        --btn-delete-hover: #5c2d2d;
+        --btn-complete-color: #3fb950;
+        --btn-complete-hover: #2a4a32;
+        --btn-reactivate-color: #d29922;
+        --btn-reactivate-hover: #4a3c1a;
+        --validation-error: #f85149;
+        --modal-backdrop: rgba(0, 0, 0, 0.7);
+        --sidebar-width: 280px;
+    }
+
+    /* Light mode */
+    .light-mode {
+        --bg-primary: #f5f7fa;
+        --bg-secondary: #ffffff;
+        --bg-tertiary: #e8ecf1;
+        --bg-card: #ffffff;
+        --bg-card-completed: #f0f0f0;
+        --bg-hover: #e0e0e0;
+        --text-primary: #2c3e50;
+        --text-secondary: #666666;
+        --text-muted: #999999;
+        --border-color: #cbd5e0;
+        --border-light: #eeeeee;
+        --accent-primary: #3498db;
+        --accent-hover: #2980b9;
+        --btn-cancel-bg: #e0e0e0;
+        --btn-cancel-hover: #d0d0d0;
+        --btn-delete-hover: #ffdddd;
+        --btn-complete-color: #27ae60;
+        --btn-complete-hover: #d4edda;
+        --btn-reactivate-color: #f39c12;
+        --btn-reactivate-hover: #fef3cd;
+        --validation-error: #e74c3c;
+        --modal-backdrop: rgba(0, 0, 0, 0.5);
+    }
+
+    /* App Layout with Sidebar */
+    .app-layout {
+        display: flex;
+        height: 100vh;
+        overflow: hidden;
+    }
+
+    .todo-sidebar {
+        width: var(--sidebar-width);
+        min-width: var(--sidebar-width);
+        background: var(--bg-secondary);
+        border-right: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        position: sticky;
+        top: 0;
+    }
+
+    .sidebar-header {
+        padding: 16px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-shrink: 0;
+    }
+
+    .sidebar-header h2 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .todo-count {
+        background: var(--accent-primary);
+        color: white;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 10px;
+    }
+
+    .sidebar-actions {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border-color);
+        flex-shrink: 0;
+    }
+
+    .sidebar-toggle {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border-color);
+        flex-shrink: 0;
+    }
+
+    .show-completed-todos {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        color: var(--text-secondary);
+        font-size: 13px;
+    }
+
+    .show-completed-todos input[type="checkbox"] {
+        accent-color: var(--accent-primary);
+    }
+
+    .btn-add-quick-todo {
+        width: 100%;
+        padding: 8px 12px;
+        background: var(--accent-primary);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+
+    .btn-add-quick-todo:hover:not(:disabled) {
+        background: var(--accent-hover);
+    }
+
+    .btn-add-quick-todo:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .sidebar-todos {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px;
+    }
+
+    .sidebar-todo-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 10px;
+        border-radius: 6px;
+        margin-bottom: 4px;
+        background: var(--bg-tertiary);
+        cursor: default;
+        transition: background-color 0.15s;
+    }
+
+    .sidebar-todo-item:hover {
+        background: var(--bg-hover);
+    }
+
+    .sidebar-todo-item.completed {
+        opacity: 0.6;
+    }
+
+    .sidebar-todo-item.completed .sidebar-todo-text {
+        text-decoration: line-through;
+        color: var(--text-muted);
+    }
+
+    .sidebar-todo-item input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        margin-top: 2px;
+        cursor: pointer;
+        accent-color: var(--accent-primary);
+        flex-shrink: 0;
+    }
+
+    .sidebar-todo-content {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .sidebar-todo-text {
+        display: block;
+        font-size: 13px;
+        color: var(--text-primary);
+        word-break: break-word;
+        line-height: 1.4;
+    }
+
+    .sidebar-todo-context {
+        display: block;
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .sidebar-todo-context.board-context {
+        color: var(--accent-primary);
+        font-weight: 500;
+    }
+
+    .sidebar-todo-item.board-level {
+        border-left: 3px solid var(--accent-primary);
+    }
+
+    .sidebar-empty {
+        padding: 20px;
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 13px;
+    }
+
+    .kanban-container {
+        padding: 20px;
+        height: 100vh;
+        background: var(--bg-primary);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        flex: 1;
+    }
+
+    .info-banner {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        margin-bottom: 12px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        flex-shrink: 0;
+    }
+
+    .info-banner strong {
+        color: var(--text-primary);
+        font-family: monospace;
+        font-size: 12px;
+    }
+
+    .info-icon {
+        color: var(--accent-primary);
+    }
+
+    .btn-backup {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        margin-left: auto;
+        background: var(--bg-hover);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        color: var(--text-secondary);
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn-backup:hover {
+        background: var(--accent-primary);
+        color: white;
+        border-color: var(--accent-primary);
+    }
+
+    .backup-message {
+        font-size: 12px;
+        padding: 4px 8px;
+        border-radius: 4px;
+    }
+
+    .backup-message.success {
+        color: var(--btn-complete-color);
+    }
+
+    .backup-message.error {
+        color: var(--validation-error);
+    }
+
+    /* Modal Styles */
+    .modal-backdrop {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: var(--modal-backdrop);
+        z-index: 1000;
+    }
+
+    .modal-dialog {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 1001;
+        width: 90%;
+        max-width: 500px;
+    }
+
+    .modal-content {
+        background: var(--bg-secondary);
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-content h3 {
+        margin: 0 0 20px 0;
+        color: var(--text-primary);
+        font-size: 1.25rem;
+        border-bottom: 1px solid var(--border-light);
+        padding-bottom: 12px;
+    }
+
+    .modal-description {
+        color: var(--text-secondary);
+        font-size: 13px;
+        margin-bottom: 16px;
+    }
+
+    .modal-input {
+        width: 100%;
+        padding: 12px;
+        margin-bottom: 16px;
+        border: 2px solid var(--border-color);
+        border-radius: 8px;
+        font-size: 16px;
+        box-sizing: border-box;
+        transition: border-color 0.2s;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .modal-input:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+    }
+
+    .modal-input.invalid {
+        border-color: var(--validation-error);
+    }
+
+    .form-group {
+        margin-bottom: 16px;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-secondary);
+    }
+
+    .optional-label {
+        font-weight: 400;
+        color: var(--text-muted);
+        font-size: 11px;
+    }
+
+    .modal-select {
+        width: 100%;
+        padding: 12px;
+        border: 2px solid var(--border-color);
+        border-radius: 8px;
+        font-size: 16px;
+        box-sizing: border-box;
+        transition: border-color 0.2s;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        cursor: pointer;
+    }
+
+    .modal-select:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+    }
+
+    .modal-select:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .validation-error {
+        color: var(--validation-error);
+        font-size: 12px;
+        margin-top: -12px;
+        margin-bottom: 12px;
+        display: block;
+    }
+
+    .modal-info {
+        font-size: 13px;
+        padding: 10px 12px;
+        border-radius: 6px;
+        margin-bottom: 16px;
+        transition: all 0.2s;
+    }
+
+    .modal-info.board-level-info {
+        background: rgba(88, 166, 255, 0.1);
+        border: 1px solid var(--accent-primary);
+        color: var(--accent-primary);
+    }
+
+    .modal-info.card-level-info {
+        background: rgba(63, 185, 80, 0.1);
+        border: 1px solid var(--btn-complete-color);
+        color: var(--btn-complete-color);
+    }
+
+    .modal-textarea {
+        width: 100%;
+        padding: 12px;
+        margin-bottom: 16px;
+        border: 2px solid var(--border-color);
+        border-radius: 8px;
+        font-size: 16px;
+        min-height: 100px;
+        resize: vertical;
+        box-sizing: border-box;
+        font-family: inherit;
+        transition: border-color 0.2s;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .modal-textarea:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+    }
+
+    .modal-buttons {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+        margin-top: 8px;
+    }
+
+    .modal-buttons .btn-cancel {
+        padding: 12px 24px;
+        background: var(--btn-cancel-bg);
+        color: var(--text-primary);
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: background-color 0.2s;
+    }
+
+    .modal-buttons .btn-save {
+        padding: 12px 24px;
+        background: var(--accent-primary);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: background-color 0.2s;
+    }
+
+    .modal-buttons .btn-cancel:hover {
+        background: var(--btn-cancel-hover);
+    }
+
+    .modal-buttons .btn-save:hover {
+        background: var(--accent-hover);
+    }
+
+    /* Responsive modal for small screens */
+    @@media (max-width: 480px) {
+        .modal-dialog {
+            width: 95%;
+            top: auto;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            transform: none;
+            max-width: none;
+        }
+
+        .modal-content {
+            border-radius: 16px 16px 0 0;
+            padding: 20px;
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+
+        .modal-buttons {
+            flex-direction: column-reverse;
+        }
+
+        .modal-buttons .btn-cancel,
+        .modal-buttons .btn-save {
+            width: 100%;
+            padding: 14px;
+        }
+    }
+
+    .kanban-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .kanban-header h1 {
+        margin: 0;
+        color: var(--text-primary);
+    }
+
+    .board-title-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .board-selector {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .board-dropdown {
+        padding: 6px 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        font-size: 14px;
+        cursor: pointer;
+        min-width: 150px;
+    }
+
+    .board-dropdown:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+    }
+
+    .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 60px 20px;
+        color: var(--text-secondary);
+        gap: 20px;
+    }
+
+    .empty-state p {
+        font-size: 1.1rem;
+        margin: 0;
+    }
+
+    .board-name-clickable {
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 4px;
+        transition: background-color 0.2s;
+    }
+
+    .board-name-clickable:hover {
+        background-color: var(--bg-hover);
+    }
+
+    .board-name-edit {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .board-name-input {
+        font-size: 1.5rem;
+        font-weight: bold;
+        padding: 4px 8px;
+        border: 2px solid var(--accent-primary);
+        border-radius: 4px;
+        color: var(--text-primary);
+        background: var(--bg-tertiary);
+    }
+
+    .header-controls {
+        display: flex;
+        gap: 20px;
+        align-items: center;
+    }
+
+    .show-completed {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        color: var(--text-secondary);
+    }
+
+    .btn-collapse-all {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 13px;
+        color: var(--text-secondary);
+        transition: all 0.2s;
+    }
+
+    .btn-collapse-all:hover:not(:disabled) {
+        background: var(--bg-hover);
+        color: var(--text-primary);
+    }
+
+    .btn-collapse-all:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .collapse-all-icon {
+        font-size: 10px;
+        transition: transform 0.2s;
+    }
+
+    .collapse-all-icon.collapsed {
+        transform: rotate(-90deg);
+    }
+
+    .btn-add-swimlane {
+        padding: 10px 20px;
+        background: var(--accent-primary);
+        color: white;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+
+    .btn-add-swimlane:hover {
+        background: var(--accent-hover);
+    }
+
+    .kanban-board {
+        display: flex;
+        gap: 20px;
+        overflow: auto;
+        padding-bottom: 20px;
+        padding-right: 20px;
+        flex: 1;
+        align-items: flex-start;
+    }
+
+    .swimlane {
+        min-width: 300px;
+        max-width: 300px;
+        max-height: 100%;
+        background: var(--bg-tertiary);
+        border-radius: 8px;
+        padding: 15px;
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+    }
+
+    .swimlane-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid var(--border-color);
+    }
+
+    .swimlane-header h3 {
+        margin: 0;
+        color: var(--text-primary);
+    }
+
+    .swimlane-actions {
+        display: flex;
+        gap: 5px;
+    }
+
+    .swimlane-tasks {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-height: 50px;
+        overflow-y: auto;
+    }
+
+    .task-card {
+        background: var(--bg-card);
+        border-radius: 6px;
+        padding: 12px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        cursor: grab;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .task-card:hover {
+        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+    }
+
+    .task-card.completed {
+        opacity: 0.7;
+        background: var(--bg-card-completed);
+    }
+
+    .task-card.completed .task-title {
+        text-decoration: line-through;
+        color: var(--text-muted);
+    }
+
+    .task-card.collapsed {
+        padding: 8px 12px;
+    }
+
+    .task-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+
+    .task-card.collapsed .task-header {
+        margin-bottom: 0;
+    }
+
+    .btn-collapse {
+        background: none;
+        border: none;
+        padding: 2px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-muted);
+        transition: color 0.2s;
+    }
+
+    .btn-collapse:hover {
+        color: var(--text-primary);
+    }
+
+    .collapse-icon {
+        font-size: 10px;
+        transition: transform 0.2s;
+        display: inline-block;
+    }
+
+    .collapse-icon.collapsed {
+        transform: rotate(-90deg);
+    }
+
+    .collapsed-summary {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .todo-badge {
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: 11px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: 500;
+    }
+
+    .task-title {
+        font-weight: 500;
+        color: var(--text-primary);
+        flex: 1;
+    }
+
+    .task-description {
+        color: var(--text-secondary);
+        font-size: 13px;
+        margin: 0 0 8px 0;
+    }
+
+    .todo-list {
+        margin: 8px 0;
+        padding: 8px;
+        background: var(--bg-tertiary);
+        border-radius: 4px;
+    }
+
+    .todo-header {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-bottom: 6px;
+        font-weight: 500;
+    }
+
+    .todo-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 0;
+        font-size: 12px;
+        color: var(--text-secondary);
+    }
+
+    .todo-item.completed .todo-text {
+        text-decoration: line-through;
+        color: var(--text-muted);
+    }
+
+    .todo-item input[type="checkbox"] {
+        width: 14px;
+        height: 14px;
+        cursor: pointer;
+        accent-color: var(--accent-primary);
+    }
+
+    .todo-text {
+        flex: 1;
+        word-break: break-word;
+    }
+
+    .btn-todo-delete {
+        opacity: 0;
+        font-size: 14px;
+        padding: 0 4px;
+        color: var(--text-muted);
+    }
+
+    .todo-item:hover .btn-todo-delete {
+        opacity: 1;
+    }
+
+    .btn-todo-delete:hover {
+        color: var(--validation-error);
+    }
+
+    .add-todo-inline {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin: 8px 0;
+    }
+
+    .todo-input {
+        flex: 1;
+        padding: 4px 8px;
+        font-size: 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .todo-input:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+    }
+
+    .btn-add-todo {
+        font-size: 11px;
+        padding: 4px 8px;
+        background: transparent;
+        border: 1px dashed var(--border-color);
+        border-radius: 4px;
+        color: var(--text-muted);
+        cursor: pointer;
+    }
+
+    .btn-add-todo:hover {
+        background: var(--bg-hover);
+        color: var(--text-secondary);
+    }
+
+    /* Notes Section */
+    .card-notes-section {
+        margin: 8px 0;
+        border: 1px solid var(--border-light);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .notes-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 8px;
+        background: var(--bg-tertiary);
+        cursor: pointer;
+        font-size: 12px;
+        color: var(--text-secondary);
+        transition: background-color 0.15s;
+    }
+
+    .notes-header:hover {
+        background: var(--bg-hover);
+    }
+
+    .notes-icon, .links-icon {
+        font-size: 11px;
+    }
+
+    .notes-indicator {
+        color: var(--accent-primary);
+        font-weight: bold;
+    }
+
+    .expand-icon {
+        margin-left: auto;
+        font-size: 8px;
+        transition: transform 0.2s;
+    }
+
+    .expand-icon.expanded {
+        transform: rotate(90deg);
+    }
+
+    .notes-textarea {
+        width: 100%;
+        min-height: 60px;
+        padding: 8px;
+        border: none;
+        border-top: 1px solid var(--border-light);
+        background: var(--bg-card);
+        color: var(--text-primary);
+        font-size: 12px;
+        font-family: inherit;
+        resize: vertical;
+        box-sizing: border-box;
+    }
+
+    .notes-textarea:focus {
+        outline: none;
+        background: var(--bg-tertiary);
+    }
+
+    .notes-textarea::placeholder {
+        color: var(--text-muted);
+    }
+
+    /* Links Section */
+    .card-links-section {
+        margin: 8px 0;
+        border: 1px solid var(--border-light);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .links-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 8px;
+        background: var(--bg-tertiary);
+        cursor: pointer;
+        font-size: 12px;
+        color: var(--text-secondary);
+        transition: background-color 0.15s;
+    }
+
+    .links-header:hover {
+        background: var(--bg-hover);
+    }
+
+    .links-count {
+        color: var(--text-muted);
+        font-size: 11px;
+    }
+
+    .links-content {
+        padding: 8px;
+        border-top: 1px solid var(--border-light);
+        background: var(--bg-card);
+    }
+
+    .link-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 0;
+        font-size: 12px;
+    }
+
+    .link-item a {
+        color: var(--accent-primary);
+        text-decoration: none;
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .link-item a:hover {
+        text-decoration: underline;
+    }
+
+    .btn-link-delete {
+        opacity: 0;
+        font-size: 14px;
+        padding: 0 4px;
+        color: var(--text-muted);
+    }
+
+    .link-item:hover .btn-link-delete {
+        opacity: 1;
+    }
+
+    .btn-link-delete:hover {
+        color: var(--validation-error);
+    }
+
+    .add-link-form {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--border-light);
+    }
+
+    .link-input {
+        padding: 6px 8px;
+        font-size: 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .link-input:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+    }
+
+    .link-form-actions {
+        display: flex;
+        gap: 4px;
+        justify-content: flex-end;
+    }
+
+    .btn-add-link {
+        font-size: 11px;
+        padding: 4px 8px;
+        margin-top: 4px;
+        background: transparent;
+        border: 1px dashed var(--border-color);
+        border-radius: 4px;
+        color: var(--text-muted);
+        cursor: pointer;
+    }
+
+    .btn-add-link:hover {
+        background: var(--bg-hover);
+        color: var(--text-secondary);
+    }
+
+    .task-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        color: var(--text-muted);
+        font-size: 11px;
+        margin-bottom: 8px;
+    }
+
+    .task-actions {
+        display: flex;
+        gap: 5px;
+        justify-content: flex-end;
+    }
+
+    .btn-icon {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 14px;
+        color: var(--text-secondary);
+    }
+
+    .btn-icon:hover {
+        background: var(--bg-hover);
+    }
+
+    .btn-delete:hover {
+        background: var(--btn-delete-hover);
+    }
+
+    .btn-complete {
+        color: var(--btn-complete-color);
+    }
+
+    .btn-complete:hover {
+        background: var(--btn-complete-hover);
+    }
+
+    .btn-reactivate {
+        color: var(--btn-reactivate-color);
+    }
+
+    .btn-reactivate:hover {
+        background: var(--btn-reactivate-hover);
+    }
+
+    .btn-add-task {
+        margin-top: 10px;
+        padding: 8px;
+        background: transparent;
+        border: 2px dashed var(--border-color);
+        border-radius: 6px;
+        cursor: pointer;
+        color: var(--text-secondary);
+    }
+
+    .btn-add-task:hover {
+        background: var(--bg-hover);
+        border-color: var(--text-muted);
+    }
+
+    .edit-input {
+        flex: 1;
+        padding: 5px;
+        border: 1px solid var(--accent-primary);
+        border-radius: 4px;
+        font-size: 14px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+</style>
+
+@code {
+    private List<Board> allBoards = new();
+    private Board? board;
+    private bool showCompleted = true;
+    private bool showCompletedTodos = false;
+    private string dataFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BoardCollection.json");
+
+    // Backup
+    private string backupMessage = "";
+    private bool backupSuccess = false;
+
+    // Helper class for sidebar todos (LaneId/CardId are Guid.Empty for board-level todos)
+    private record TodoInfo(TodoItem Todo, Guid LaneId, string LaneName, Guid CardId, string CardTitle, bool IsBoardLevel);
+
+    // Board name editing
+    private bool editingBoardName = false;
+    private string newBoardName = "";
+
+    // New board panel
+    private bool showNewBoardPanel = false;
+    private string createBoardName = "";
+    private string createBoardLaneLabel = "Lane";
+    private string createBoardCardLabel = "Card";
+    private string createBoardTodoLabel = "Todo";
+    private bool showNewBoardValidation = false;
+    private ElementReference newBoardNameInput;
+    private bool shouldFocusNewBoardInput = false;
+
+    // Edit board panel
+    private bool showEditBoardPanel = false;
+    private string editBoardName = "";
+    private string editBoardLaneLabel = "";
+    private string editBoardCardLabel = "";
+    private string editBoardTodoLabel = "";
+    private bool showEditBoardValidation = false;
+    private ElementReference editBoardNameInput;
+    private bool shouldFocusEditBoardInput = false;
+
+    // Lane panel
+    private bool showLanePanel = false;
+    private string newLaneName = "";
+    private bool showLaneValidation = false;
+    private ElementReference laneNameInput;
+    private bool shouldFocusLaneInput = false;
+
+    // Lane editing
+    private Guid? editingLaneId;
+    private string editingLaneName = "";
+
+    // Card panel
+    private bool showCardPanel = false;
+    private Guid currentLaneId;
+    private string currentLaneName = "";
+    private string newCardTitle = "";
+    private string newCardDescription = "";
+    private Card? editingCard;
+    private bool showCardValidation = false;
+    private ElementReference cardTitleInput;
+    private bool shouldFocusCardInput = false;
+
+    // Todo inline add
+    private Guid? addingTodoForCardId;
+    private string newTodoText = "";
+
+    // Quick add todo panel
+    private bool showQuickAddTodoPanel = false;
+    private Guid quickTodoLaneId;
+    private Guid quickTodoCardId;
+    private string quickTodoText = "";
+    private bool showQuickTodoValidation = false;
+    private ElementReference quickTodoTextInput;
+    private bool shouldFocusQuickTodoInput = false;
+
+    // Drag and drop
+    private Guid dragFromLaneId;
+    private Card? draggedCard;
+
+    // Collapsed cards
+    private HashSet<Guid> collapsedCardIds = new();
+
+    // Notes expansion
+    private HashSet<Guid> expandedNotesCardIds = new();
+    private Dictionary<Guid, string> notesTextCache = new();
+
+    // Links expansion and adding
+    private HashSet<Guid> expandedLinksCardIds = new();
+    private Guid? addingLinkForCardId;
+    private string newLinkTitle = "";
+    private string newLinkUrl = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        allBoards = await BoardService.GetAllBoardsAsync();
+        board = await BoardService.GetLastOpenedBoardAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (shouldFocusNewBoardInput)
+        {
+            shouldFocusNewBoardInput = false;
+            await newBoardNameInput.FocusAsync();
+        }
+        else if (shouldFocusEditBoardInput)
+        {
+            shouldFocusEditBoardInput = false;
+            await editBoardNameInput.FocusAsync();
+        }
+        else if (shouldFocusLaneInput)
+        {
+            shouldFocusLaneInput = false;
+            await laneNameInput.FocusAsync();
+        }
+        else if (shouldFocusCardInput)
+        {
+            shouldFocusCardInput = false;
+            await cardTitleInput.FocusAsync();
+        }
+        else if (shouldFocusQuickTodoInput)
+        {
+            shouldFocusQuickTodoInput = false;
+            await quickTodoTextInput.FocusAsync();
+        }
+    }
+
+    // Board selection
+    private async Task OnBoardSelected(ChangeEventArgs e)
+    {
+        if (Guid.TryParse(e.Value?.ToString(), out var boardId))
+        {
+            board = await BoardService.GetBoardAsync(boardId);
+            await BoardService.SetLastOpenedBoardAsync(boardId);
+        }
+    }
+
+    // Board name methods
+    private void StartEditBoardName()
+    {
+        newBoardName = board?.Name ?? "";
+        editingBoardName = true;
+    }
+
+    private void CancelBoardNameEdit()
+    {
+        editingBoardName = false;
+    }
+
+    private async Task HandleBoardNameKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SaveBoardName();
+        }
+        else if (e.Key == "Escape")
+        {
+            CancelBoardNameEdit();
+        }
+    }
+
+    private async Task SaveBoardName()
+    {
+        if (!string.IsNullOrWhiteSpace(newBoardName) && board != null)
+        {
+            await BoardService.UpdateBoardAsync(board.Id, newBoardName.Trim(), board.LaneLabel, board.CardLabel, board.TodoLabel);
+            board = await BoardService.GetBoardAsync(board.Id);
+            allBoards = await BoardService.GetAllBoardsAsync();
+        }
+        editingBoardName = false;
+    }
+
+    // New board methods
+    private void ShowNewBoardPanel()
+    {
+        createBoardName = "";
+        createBoardLaneLabel = "Lane";
+        createBoardCardLabel = "Card";
+        createBoardTodoLabel = "Todo";
+        showNewBoardValidation = false;
+        showNewBoardPanel = true;
+        shouldFocusNewBoardInput = true;
+    }
+
+    private void CloseNewBoardPanel()
+    {
+        showNewBoardPanel = false;
+        showNewBoardValidation = false;
+    }
+
+    private async Task HandleNewBoardModalKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await CreateNewBoard();
+        }
+        else if (e.Key == "Escape")
+        {
+            CloseNewBoardPanel();
+        }
+    }
+
+    private async Task CreateNewBoard()
+    {
+        showNewBoardValidation = true;
+        if (!string.IsNullOrWhiteSpace(createBoardName))
+        {
+            var laneLabel = string.IsNullOrWhiteSpace(createBoardLaneLabel) ? "Lane" : createBoardLaneLabel.Trim();
+            var cardLabel = string.IsNullOrWhiteSpace(createBoardCardLabel) ? "Card" : createBoardCardLabel.Trim();
+            var todoLabel = string.IsNullOrWhiteSpace(createBoardTodoLabel) ? "Todo" : createBoardTodoLabel.Trim();
+            board = await BoardService.CreateBoardAsync(createBoardName.Trim(), laneLabel, cardLabel, todoLabel);
+            allBoards = await BoardService.GetAllBoardsAsync();
+            CloseNewBoardPanel();
+        }
+    }
+
+    // Edit board methods
+    private void ShowEditBoardPanel()
+    {
+        if (board != null)
+        {
+            editBoardName = board.Name;
+            editBoardLaneLabel = board.LaneLabel;
+            editBoardCardLabel = board.CardLabel;
+            editBoardTodoLabel = board.TodoLabel;
+            showEditBoardValidation = false;
+            showEditBoardPanel = true;
+            shouldFocusEditBoardInput = true;
+        }
+    }
+
+    private void CloseEditBoardPanel()
+    {
+        showEditBoardPanel = false;
+        showEditBoardValidation = false;
+    }
+
+    private async Task HandleEditBoardModalKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SaveBoardSettings();
+        }
+        else if (e.Key == "Escape")
+        {
+            CloseEditBoardPanel();
+        }
+    }
+
+    private async Task SaveBoardSettings()
+    {
+        showEditBoardValidation = true;
+        if (!string.IsNullOrWhiteSpace(editBoardName) && board != null)
+        {
+            var laneLabel = string.IsNullOrWhiteSpace(editBoardLaneLabel) ? "Lane" : editBoardLaneLabel.Trim();
+            var cardLabel = string.IsNullOrWhiteSpace(editBoardCardLabel) ? "Card" : editBoardCardLabel.Trim();
+            var todoLabel = string.IsNullOrWhiteSpace(editBoardTodoLabel) ? "Todo" : editBoardTodoLabel.Trim();
+            await BoardService.UpdateBoardAsync(board.Id, editBoardName.Trim(), laneLabel, cardLabel, todoLabel);
+            board = await BoardService.GetBoardAsync(board.Id);
+            allBoards = await BoardService.GetAllBoardsAsync();
+            CloseEditBoardPanel();
+        }
+    }
+
+    private async Task DeleteCurrentBoard()
+    {
+        if (board != null)
+        {
+            await BoardService.DeleteBoardAsync(board.Id);
+            allBoards = await BoardService.GetAllBoardsAsync();
+            board = await BoardService.GetLastOpenedBoardAsync();
+        }
+    }
+
+    // Lane methods
+    private void ShowAddLanePanel()
+    {
+        newLaneName = "";
+        showLaneValidation = false;
+        showLanePanel = true;
+        showCardPanel = false;
+        shouldFocusLaneInput = true;
+    }
+
+    private void CloseAddLanePanel()
+    {
+        showLanePanel = false;
+        showLaneValidation = false;
+    }
+
+    private async Task HandleLaneModalKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await AddLane();
+        }
+        else if (e.Key == "Escape")
+        {
+            CloseAddLanePanel();
+        }
+    }
+
+    private async Task AddLane()
+    {
+        showLaneValidation = true;
+        if (!string.IsNullOrWhiteSpace(newLaneName) && board != null)
+        {
+            await BoardService.AddLaneAsync(board.Id, newLaneName.Trim());
+            board = await BoardService.GetBoardAsync(board.Id);
+            CloseAddLanePanel();
+        }
+    }
+
+    private void StartEditLane(Lane lane)
+    {
+        editingLaneId = lane.Id;
+        editingLaneName = lane.Name;
+    }
+
+    private async Task HandleLaneEditKeyPress(KeyboardEventArgs e, Guid laneId)
+    {
+        if (e.Key == "Enter")
+        {
+            await SaveLaneEdit(laneId);
+        }
+        else if (e.Key == "Escape")
+        {
+            CancelLaneEdit();
+        }
+    }
+
+    private async Task SaveLaneEdit(Guid laneId)
+    {
+        if (!string.IsNullOrWhiteSpace(editingLaneName) && board != null)
+        {
+            await BoardService.UpdateLaneAsync(board.Id, laneId, editingLaneName.Trim());
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+        CancelLaneEdit();
+    }
+
+    private void CancelLaneEdit()
+    {
+        editingLaneId = null;
+        editingLaneName = "";
+    }
+
+    private async Task DeleteLane(Guid laneId)
+    {
+        if (board != null)
+        {
+            await BoardService.DeleteLaneAsync(board.Id, laneId);
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    // Card methods
+    private void ShowAddCardPanel(Guid laneId)
+    {
+        currentLaneId = laneId;
+        currentLaneName = board?.Lanes.FirstOrDefault(l => l.Id == laneId)?.Name ?? "";
+        newCardTitle = "";
+        newCardDescription = "";
+        editingCard = null;
+        showCardValidation = false;
+        showCardPanel = true;
+        showLanePanel = false;
+        shouldFocusCardInput = true;
+    }
+
+    private void ShowEditCardPanel(Guid laneId, Card card)
+    {
+        currentLaneId = laneId;
+        currentLaneName = board?.Lanes.FirstOrDefault(l => l.Id == laneId)?.Name ?? "";
+        editingCard = card;
+        newCardTitle = card.Title;
+        newCardDescription = card.Description;
+        showCardValidation = false;
+        showCardPanel = true;
+        showLanePanel = false;
+        shouldFocusCardInput = true;
+    }
+
+    private void CloseCardPanel()
+    {
+        showCardPanel = false;
+        showCardValidation = false;
+        editingCard = null;
+    }
+
+    private async Task HandleCardModalKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SaveCard();
+        }
+        else if (e.Key == "Escape")
+        {
+            CloseCardPanel();
+        }
+    }
+
+    private async Task SaveCard()
+    {
+        showCardValidation = true;
+        if (!string.IsNullOrWhiteSpace(newCardTitle) && board != null)
+        {
+            if (editingCard != null)
+            {
+                await BoardService.UpdateCardAsync(board.Id, currentLaneId, editingCard.Id, newCardTitle.Trim(), newCardDescription.Trim());
+            }
+            else
+            {
+                await BoardService.AddCardAsync(board.Id, currentLaneId, newCardTitle.Trim(), newCardDescription.Trim());
+            }
+            board = await BoardService.GetBoardAsync(board.Id);
+            CloseCardPanel();
+        }
+    }
+
+    private async Task CompleteCard(Guid laneId, Guid cardId)
+    {
+        if (board != null)
+        {
+            await BoardService.SetCardCompletionAsync(board.Id, laneId, cardId, true);
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    private async Task ReactivateCard(Guid laneId, Guid cardId)
+    {
+        if (board != null)
+        {
+            await BoardService.SetCardCompletionAsync(board.Id, laneId, cardId, false);
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    private async Task DeleteCard(Guid laneId, Guid cardId)
+    {
+        if (board != null)
+        {
+            await BoardService.DeleteCardAsync(board.Id, laneId, cardId);
+            board = await BoardService.GetBoardAsync(board.Id);
+            collapsedCardIds.Remove(cardId);
+        }
+    }
+
+    private void ToggleCardCollapse(Guid cardId)
+    {
+        if (collapsedCardIds.Contains(cardId))
+        {
+            collapsedCardIds.Remove(cardId);
+        }
+        else
+        {
+            collapsedCardIds.Add(cardId);
+        }
+    }
+
+    private bool IsCardCollapsed(Guid cardId) => collapsedCardIds.Contains(cardId);
+
+    private bool AreAllCardsCollapsed()
+    {
+        if (board == null) return false;
+        var allCardIds = board.Lanes.SelectMany(l => l.Cards).Select(c => c.Id).ToList();
+        return allCardIds.Count > 0 && allCardIds.All(id => collapsedCardIds.Contains(id));
+    }
+
+    private void ToggleCollapseAll()
+    {
+        if (board == null) return;
+        
+        var allCardIds = board.Lanes.SelectMany(l => l.Cards).Select(c => c.Id).ToList();
+        
+        if (AreAllCardsCollapsed())
+        {
+            // Expand all
+            foreach (var cardId in allCardIds)
+            {
+                collapsedCardIds.Remove(cardId);
+            }
+        }
+        else
+        {
+            // Collapse all
+            foreach (var cardId in allCardIds)
+            {
+                collapsedCardIds.Add(cardId);
+            }
+        }
+    }
+
+    private void StartDrag(Guid laneId, Card card)
+    {
+        dragFromLaneId = laneId;
+        draggedCard = card;
+    }
+
+    private async Task Drop(Guid toLaneId)
+    {
+        if (draggedCard != null && dragFromLaneId != toLaneId && board != null)
+        {
+            await BoardService.MoveCardAsync(board.Id, dragFromLaneId, toLaneId, draggedCard.Id);
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+        draggedCard = null;
+    }
+
+    // Todo methods
+    private void StartAddTodo(Guid cardId)
+    {
+        addingTodoForCardId = cardId;
+        newTodoText = "";
+    }
+
+    private void CancelAddTodo()
+    {
+        addingTodoForCardId = null;
+        newTodoText = "";
+    }
+
+    private async Task HandleTodoKeyDown(KeyboardEventArgs e, Guid laneId, Guid cardId)
+    {
+        if (e.Key == "Enter")
+        {
+            await AddTodo(laneId, cardId);
+        }
+        else if (e.Key == "Escape")
+        {
+            CancelAddTodo();
+        }
+    }
+
+    private async Task AddTodo(Guid laneId, Guid cardId)
+    {
+        if (!string.IsNullOrWhiteSpace(newTodoText) && board != null)
+        {
+            await BoardService.AddTodoAsync(board.Id, laneId, cardId, newTodoText.Trim());
+            board = await BoardService.GetBoardAsync(board.Id);
+            newTodoText = "";
+        }
+    }
+
+    private async Task ToggleTodo(Guid laneId, Guid cardId, TodoItem todo)
+    {
+        if (board != null)
+        {
+            await BoardService.SetTodoCompletionAsync(board.Id, laneId, cardId, todo.Id, !todo.IsCompleted);
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    private async Task DeleteTodo(Guid laneId, Guid cardId, Guid todoId)
+    {
+        if (board != null)
+        {
+            await BoardService.DeleteTodoAsync(board.Id, laneId, cardId, todoId);
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    // Sidebar todo methods
+    private IEnumerable<TodoInfo> GetAllActiveTodos()
+    {
+        if (board == null) return Enumerable.Empty<TodoInfo>();
+
+        // Board-level todos
+        var boardTodos = board.Todos
+            .Where(todo => !todo.IsCompleted)
+            .Select(todo => new TodoInfo(todo, Guid.Empty, "", Guid.Empty, "", true));
+
+        // Card-level todos
+        var cardTodos = board.Lanes
+            .SelectMany(lane => lane.Cards
+                .SelectMany(card => card.Todos
+                    .Where(todo => !todo.IsCompleted)
+                    .Select(todo => new TodoInfo(todo, lane.Id, lane.Name, card.Id, card.Title, false))));
+
+        return boardTodos.Concat(cardTodos).OrderByDescending(t => t.Todo.CreatedAt);
+    }
+
+    private IEnumerable<TodoInfo> GetSidebarTodos()
+    {
+        if (board == null) return Enumerable.Empty<TodoInfo>();
+
+        // Board-level todos
+        var boardTodos = board.Todos
+            .Where(todo => showCompletedTodos || !todo.IsCompleted)
+            .Select(todo => new TodoInfo(todo, Guid.Empty, "", Guid.Empty, "", true));
+
+        // Card-level todos
+        var cardTodos = board.Lanes
+            .SelectMany(lane => lane.Cards
+                .SelectMany(card => card.Todos
+                    .Where(todo => showCompletedTodos || !todo.IsCompleted)
+                    .Select(todo => new TodoInfo(todo, lane.Id, lane.Name, card.Id, card.Title, false))));
+
+        return boardTodos.Concat(cardTodos)
+            .OrderBy(t => t.Todo.IsCompleted)
+            .ThenByDescending(t => t.Todo.CreatedAt);
+    }
+
+    private async Task ToggleSidebarTodo(TodoInfo todoInfo)
+    {
+        if (board != null)
+        {
+            if (todoInfo.IsBoardLevel)
+            {
+                await BoardService.SetBoardTodoCompletionAsync(board.Id, todoInfo.Todo.Id, !todoInfo.Todo.IsCompleted);
+            }
+            else
+            {
+                await BoardService.SetTodoCompletionAsync(board.Id, todoInfo.LaneId, todoInfo.CardId, todoInfo.Todo.Id, !todoInfo.Todo.IsCompleted);
+            }
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    // Notes methods
+    private bool IsNotesExpanded(Guid cardId) => expandedNotesCardIds.Contains(cardId);
+
+    private void ToggleNotesExpand(Guid cardId)
+    {
+        if (expandedNotesCardIds.Contains(cardId))
+        {
+            expandedNotesCardIds.Remove(cardId);
+        }
+        else
+        {
+            expandedNotesCardIds.Add(cardId);
+            // Initialize cache with current notes
+            var card = board?.Lanes.SelectMany(l => l.Cards).FirstOrDefault(c => c.Id == cardId);
+            if (card != null)
+            {
+                notesTextCache[cardId] = card.Notes;
+            }
+        }
+    }
+
+    private void OnNotesInput(Guid cardId, ChangeEventArgs e)
+    {
+        notesTextCache[cardId] = e.Value?.ToString() ?? "";
+    }
+
+    private async Task SaveNotes(Guid laneId, Guid cardId)
+    {
+        if (board != null && notesTextCache.TryGetValue(cardId, out var notes))
+        {
+            await BoardService.UpdateCardNotesAsync(board.Id, laneId, cardId, notes);
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    // Links methods
+    private bool IsLinksExpanded(Guid cardId) => expandedLinksCardIds.Contains(cardId);
+
+    private void ToggleLinksExpand(Guid cardId)
+    {
+        if (expandedLinksCardIds.Contains(cardId))
+        {
+            expandedLinksCardIds.Remove(cardId);
+            if (addingLinkForCardId == cardId)
+            {
+                CancelAddLink();
+            }
+        }
+        else
+        {
+            expandedLinksCardIds.Add(cardId);
+        }
+    }
+
+    private void StartAddLink(Guid cardId)
+    {
+        addingLinkForCardId = cardId;
+        newLinkTitle = "";
+        newLinkUrl = "";
+    }
+
+    private void CancelAddLink()
+    {
+        addingLinkForCardId = null;
+        newLinkTitle = "";
+        newLinkUrl = "";
+    }
+
+    private async Task HandleLinkKeyDown(KeyboardEventArgs e, Guid laneId, Guid cardId)
+    {
+        if (e.Key == "Enter")
+        {
+            await AddLink(laneId, cardId);
+        }
+        else if (e.Key == "Escape")
+        {
+            CancelAddLink();
+        }
+    }
+
+    private async Task AddLink(Guid laneId, Guid cardId)
+    {
+        if (!string.IsNullOrWhiteSpace(newLinkUrl) && board != null)
+        {
+            await BoardService.AddCardLinkAsync(board.Id, laneId, cardId, newLinkTitle.Trim(), newLinkUrl.Trim());
+            board = await BoardService.GetBoardAsync(board.Id);
+            CancelAddLink();
+        }
+    }
+
+    private async Task DeleteLink(Guid laneId, Guid cardId, Guid linkId)
+    {
+        if (board != null)
+        {
+            await BoardService.DeleteCardLinkAsync(board.Id, laneId, cardId, linkId);
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    // Quick add todo methods
+    private bool HasAvailableCards()
+    {
+        return board?.Lanes.Any(l => l.Cards.Any()) ?? false;
+    }
+
+    private bool IsBoardLevelTodo()
+    {
+        return quickTodoLaneId == Guid.Empty && quickTodoCardId == Guid.Empty;
+    }
+
+    private bool IsPartialSelection()
+    {
+        return (quickTodoLaneId != Guid.Empty && quickTodoCardId == Guid.Empty) ||
+               (quickTodoLaneId == Guid.Empty && quickTodoCardId != Guid.Empty);
+    }
+
+    private string GetSelectedCardName()
+    {
+        if (board == null || quickTodoCardId == Guid.Empty) return "";
+        var lane = board.Lanes.FirstOrDefault(l => l.Id == quickTodoLaneId);
+        var card = lane?.Cards.FirstOrDefault(c => c.Id == quickTodoCardId);
+        return card?.Title ?? "";
+    }
+
+    private void ShowQuickAddTodoPanel()
+    {
+        quickTodoLaneId = Guid.Empty;
+        quickTodoCardId = Guid.Empty;
+        quickTodoText = "";
+        showQuickTodoValidation = false;
+        showQuickAddTodoPanel = true;
+    }
+
+    private void CloseQuickAddTodoPanel()
+    {
+        showQuickAddTodoPanel = false;
+        showQuickTodoValidation = false;
+    }
+
+    private void OnQuickTodoLaneChanged()
+    {
+        quickTodoCardId = Guid.Empty;
+    }
+
+    private async Task HandleQuickAddTodoKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await AddQuickTodo();
+        }
+        else if (e.Key == "Escape")
+        {
+            CloseQuickAddTodoPanel();
+        }
+    }
+
+    private async Task AddQuickTodo()
+    {
+        showQuickTodoValidation = true;
+        if (string.IsNullOrWhiteSpace(quickTodoText) || board == null)
+        {
+            return;
+        }
+
+        // Validate: must select both lane and card, or neither (for board-level)
+        if (IsPartialSelection())
+        {
+            return;
+        }
+
+        if (IsBoardLevelTodo())
+        {
+            // Add as board-level todo
+            await BoardService.AddBoardTodoAsync(board.Id, quickTodoText.Trim());
+        }
+        else
+        {
+            // Add as card-level todo
+            await BoardService.AddTodoAsync(board.Id, quickTodoLaneId, quickTodoCardId, quickTodoText.Trim());
+        }
+        
+        board = await BoardService.GetBoardAsync(board.Id);
+        CloseQuickAddTodoPanel();
+    }
+
+    // Backup method
+    private async Task BackupData()
+    {
+        try
+        {
+            if (File.Exists(dataFilePath))
+            {
+                var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                var dateStamp = DateTime.Now.ToString("yyyyMMddHHmmss");
+                var backupFileName = $"BoardCollection-{dateStamp}.json";
+                var backupPath = Path.Combine(documentsPath, backupFileName);
+                
+                await File.WriteAllTextAsync(backupPath, await File.ReadAllTextAsync(dataFilePath));
+                
+                backupMessage = $"Backup saved: {backupFileName}";
+                backupSuccess = true;
+            }
+            else
+            {
+                backupMessage = "No data file to backup";
+                backupSuccess = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            backupMessage = $"Backup failed: {ex.Message}";
+            backupSuccess = false;
+        }
+        
+        StateHasChanged();
+        await Task.Delay(3000);
+        backupMessage = "";
+        StateHasChanged();
+    }
+}
