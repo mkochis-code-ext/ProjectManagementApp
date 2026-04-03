@@ -132,6 +132,7 @@ public class KanbanModelsTests
         Assert.NotEqual(Guid.Empty, todo.Id);
         Assert.Equal(string.Empty, todo.Text);
         Assert.False(todo.IsCompleted);
+        Assert.False(todo.IsTodaysTodo);
         Assert.True(todo.CreatedAt <= DateTime.UtcNow);
         Assert.Null(todo.CompletedAt);
         Assert.Equal(0, todo.Order);

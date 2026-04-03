@@ -26,7 +26,7 @@
         <div class="sidebar-todos">
             @foreach (var todoInfo in GetSidebarTodos())
             {
-                <div @key="todoInfo.Todo.Id" class="sidebar-todo-item @(todoInfo.Todo.IsCompleted ? "completed" : "") @(todoInfo.IsBoardLevel ? "board-level" : "")" 
+                <div @key="todoInfo.Todo.Id" class="sidebar-todo-item @(todoInfo.Todo.IsCompleted ? "completed" : "") @(todoInfo.IsBoardLevel ? "board-level" : "") @(todoInfo.Todo.IsTodaysTodo && !todoInfo.Todo.IsCompleted ? "todays-todo" : "")" 
                      title="@(todoInfo.IsBoardLevel ? "Board-level " + (board?.TodoLabel ?? "Todo") : (board?.LaneLabel ?? "Lane") + ": " + todoInfo.LaneName + "\n" + (board?.CardLabel ?? "Card") + ": " + todoInfo.CardTitle)">
                     <input type="checkbox" checked="@todoInfo.Todo.IsCompleted" 
                            @onchange="() => ToggleSidebarTodo(todoInfo)" />
@@ -41,6 +41,12 @@
                             <span class="sidebar-todo-context">@todoInfo.LaneName › @todoInfo.CardTitle</span>
                         }
                     </div>
+                    @if (!todoInfo.Todo.IsCompleted)
+                    {
+                        <button class="btn-today-toggle @(todoInfo.Todo.IsTodaysTodo ? "active" : "")" 
+                                @onclick="() => ToggleTodaysTodo(todoInfo)" 
+                                title="@(todoInfo.Todo.IsTodaysTodo ? "Remove from Today" : "Add to Today")">⭐</button>
+                    }
                 </div>
             }
             @if (!GetSidebarTodos().Any())
@@ -311,12 +317,19 @@
                                             <div class="todo-header">
                                                 <span>@(board?.TodoLabel ?? "Todo")s (@card.Todos.Count(t => t.IsCompleted)/@card.Todos.Count)</span>
                                             </div>
-                                            @foreach (var todo in card.Todos.OrderBy(t => t.Order))
+                                            @foreach (var todo in card.Todos.OrderByDescending(t => t.IsTodaysTodo && !t.IsCompleted).ThenBy(t => t.Order))
                                             {
-                                                <div class="todo-item @(todo.IsCompleted ? "completed" : "")">
+                                                <div class="todo-item @(todo.IsCompleted ? "completed" : "") @(todo.IsTodaysTodo && !todo.IsCompleted ? "todays-todo" : "")">
                                                     <input type="checkbox" checked="@todo.IsCompleted" 
                                                            @onchange="() => ToggleTodo(lane.Id, card.Id, todo)" />
                                                     <span class="todo-text">@todo.Text</span>
+                                                    @if (!todo.IsCompleted)
+                                                    {
+                                                        <button class="btn-icon btn-today-inline @(todo.IsTodaysTodo ? "active" : "")" 
+                                                                @onclick="() => ToggleCardTodaysTodo(lane.Id, card.Id, todo)" 
+                                                                @onclick:stopPropagation="true" 
+                                                                title="@(todo.IsTodaysTodo ? "Remove from Today" : "Add to Today")">⭐</button>
+                                                    }
                                                     <button class="btn-icon btn-todo-delete" @onclick="() => DeleteTodo(lane.Id, card.Id, todo.Id)" @onclick:stopPropagation="true">×</button>
                                                 </div>
                                             }
@@ -650,6 +663,38 @@
 
     .sidebar-todo-item.board-level {
         border-left: 3px solid var(--accent-primary);
+    }
+
+    .sidebar-todo-item.todays-todo {
+        border: 2px solid var(--btn-reactivate-color);
+        background: rgba(210, 153, 34, 0.08);
+    }
+
+    .sidebar-todo-item.todays-todo.board-level {
+        border-left: 3px solid var(--accent-primary);
+        border-top: 2px solid var(--btn-reactivate-color);
+        border-right: 2px solid var(--btn-reactivate-color);
+        border-bottom: 2px solid var(--btn-reactivate-color);
+    }
+
+    .btn-today-toggle {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+        padding: 2px 4px;
+        border-radius: 4px;
+        opacity: 0.3;
+        transition: opacity 0.2s;
+        flex-shrink: 0;
+    }
+
+    .btn-today-toggle:hover {
+        opacity: 0.8;
+    }
+
+    .btn-today-toggle.active {
+        opacity: 1;
     }
 
     .sidebar-empty {
@@ -1264,6 +1309,28 @@
     .todo-item.completed .todo-text {
         text-decoration: line-through;
         color: var(--text-muted);
+    }
+
+    .todo-item.todays-todo {
+        border: 1px solid var(--btn-reactivate-color);
+        border-radius: 4px;
+        padding: 4px 6px;
+        background: rgba(210, 153, 34, 0.08);
+    }
+
+    .btn-today-inline {
+        opacity: 0.3;
+        font-size: 11px;
+        padding: 0 2px;
+        transition: opacity 0.2s;
+    }
+
+    .todo-item:hover .btn-today-inline {
+        opacity: 0.6;
+    }
+
+    .btn-today-inline.active {
+        opacity: 1;
     }
 
     .todo-item input[type="checkbox"] {
@@ -2185,6 +2252,7 @@
 
         return boardTodos.Concat(cardTodos)
             .OrderBy(t => t.Todo.IsCompleted)
+            .ThenByDescending(t => t.Todo.IsTodaysTodo && !t.Todo.IsCompleted)
             .ThenByDescending(t => t.Todo.CreatedAt);
     }
 
@@ -2200,6 +2268,31 @@
             {
                 await BoardService.SetTodoCompletionAsync(board.Id, todoInfo.LaneId, todoInfo.CardId, todoInfo.Todo.Id, !todoInfo.Todo.IsCompleted);
             }
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    private async Task ToggleTodaysTodo(TodoInfo todoInfo)
+    {
+        if (board != null)
+        {
+            if (todoInfo.IsBoardLevel)
+            {
+                await BoardService.SetBoardTodaysTodoAsync(board.Id, todoInfo.Todo.Id, !todoInfo.Todo.IsTodaysTodo);
+            }
+            else
+            {
+                await BoardService.SetTodaysTodoAsync(board.Id, todoInfo.LaneId, todoInfo.CardId, todoInfo.Todo.Id, !todoInfo.Todo.IsTodaysTodo);
+            }
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    private async Task ToggleCardTodaysTodo(Guid laneId, Guid cardId, TodoItem todo)
+    {
+        if (board != null)
+        {
+            await BoardService.SetTodaysTodoAsync(board.Id, laneId, cardId, todo.Id, !todo.IsTodaysTodo);
             board = await BoardService.GetBoardAsync(board.Id);
         }
     }

@@ -346,6 +346,7 @@ public class BoardService
         {
             todo.IsCompleted = isCompleted;
             todo.CompletedAt = isCompleted ? DateTime.UtcNow : null;
+            if (isCompleted) todo.IsTodaysTodo = false;
             board!.LastModified = DateTime.UtcNow;
             await SaveCollectionAsync();
         }
@@ -392,6 +393,7 @@ public class BoardService
         {
             todo.IsCompleted = isCompleted;
             todo.CompletedAt = isCompleted ? DateTime.UtcNow : null;
+            if (isCompleted) todo.IsTodaysTodo = false;
             board!.LastModified = DateTime.UtcNow;
             await SaveCollectionAsync();
         }
@@ -405,6 +407,33 @@ public class BoardService
         {
             board!.Todos.Remove(todo);
             board.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+        }
+    }
+
+    // Today's todo operations
+    public async Task SetTodaysTodoAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, bool isTodaysTodo)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        var lane = board?.Lanes.FirstOrDefault(l => l.Id == laneId);
+        var card = lane?.Cards.FirstOrDefault(c => c.Id == cardId);
+        var todo = card?.Todos.FirstOrDefault(t => t.Id == todoId);
+        if (todo != null)
+        {
+            todo.IsTodaysTodo = isTodaysTodo;
+            board!.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+        }
+    }
+
+    public async Task SetBoardTodaysTodoAsync(Guid boardId, Guid todoId, bool isTodaysTodo)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        var todo = board?.Todos.FirstOrDefault(t => t.Id == todoId);
+        if (todo != null)
+        {
+            todo.IsTodaysTodo = isTodaysTodo;
+            board!.LastModified = DateTime.UtcNow;
             await SaveCollectionAsync();
         }
     }

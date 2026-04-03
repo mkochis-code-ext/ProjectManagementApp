@@ -829,6 +829,109 @@ public class BoardServiceTests : IDisposable
         Assert.Single(loaded!.Todos);
     }
 
+    // ── Today's Todo ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task SetTodaysTodoAsync_SetsFlag()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        var lane = await _service.AddLaneAsync(board.Id, "Lane");
+        var card = await _service.AddCardAsync(board.Id, lane.Id, "Card", "");
+        var todo = await _service.AddTodoAsync(board.Id, lane.Id, card.Id, "Do today");
+
+        await _service.SetTodaysTodoAsync(board.Id, lane.Id, card.Id, todo.Id, true);
+
+        var loaded = await _service.GetBoardAsync(board.Id);
+        Assert.True(loaded!.Lanes[0].Cards[0].Todos[0].IsTodaysTodo);
+    }
+
+    [Fact]
+    public async Task SetTodaysTodoAsync_ClearsFlag()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        var lane = await _service.AddLaneAsync(board.Id, "Lane");
+        var card = await _service.AddCardAsync(board.Id, lane.Id, "Card", "");
+        var todo = await _service.AddTodoAsync(board.Id, lane.Id, card.Id, "Do today");
+
+        await _service.SetTodaysTodoAsync(board.Id, lane.Id, card.Id, todo.Id, true);
+        await _service.SetTodaysTodoAsync(board.Id, lane.Id, card.Id, todo.Id, false);
+
+        var loaded = await _service.GetBoardAsync(board.Id);
+        Assert.False(loaded!.Lanes[0].Cards[0].Todos[0].IsTodaysTodo);
+    }
+
+    [Fact]
+    public async Task SetTodaysTodoAsync_NoOp_WhenTodoNotFound()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        var lane = await _service.AddLaneAsync(board.Id, "Lane");
+        var card = await _service.AddCardAsync(board.Id, lane.Id, "Card", "");
+
+        await _service.SetTodaysTodoAsync(board.Id, lane.Id, card.Id, Guid.NewGuid(), true);
+    }
+
+    [Fact]
+    public async Task SetBoardTodaysTodoAsync_SetsFlag()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        var todo = await _service.AddBoardTodoAsync(board.Id, "Board today task");
+
+        await _service.SetBoardTodaysTodoAsync(board.Id, todo.Id, true);
+
+        var loaded = await _service.GetBoardAsync(board.Id);
+        Assert.True(loaded!.Todos[0].IsTodaysTodo);
+    }
+
+    [Fact]
+    public async Task SetBoardTodaysTodoAsync_ClearsFlag()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        var todo = await _service.AddBoardTodoAsync(board.Id, "Board today task");
+
+        await _service.SetBoardTodaysTodoAsync(board.Id, todo.Id, true);
+        await _service.SetBoardTodaysTodoAsync(board.Id, todo.Id, false);
+
+        var loaded = await _service.GetBoardAsync(board.Id);
+        Assert.False(loaded!.Todos[0].IsTodaysTodo);
+    }
+
+    [Fact]
+    public async Task SetBoardTodaysTodoAsync_NoOp_WhenTodoNotFound()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        await _service.SetBoardTodaysTodoAsync(board.Id, Guid.NewGuid(), true);
+    }
+
+    [Fact]
+    public async Task SetTodoCompletionAsync_ClearsTodaysTodo_WhenCompleted()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        var lane = await _service.AddLaneAsync(board.Id, "Lane");
+        var card = await _service.AddCardAsync(board.Id, lane.Id, "Card", "");
+        var todo = await _service.AddTodoAsync(board.Id, lane.Id, card.Id, "Do today");
+
+        await _service.SetTodaysTodoAsync(board.Id, lane.Id, card.Id, todo.Id, true);
+        await _service.SetTodoCompletionAsync(board.Id, lane.Id, card.Id, todo.Id, true);
+
+        var loaded = await _service.GetBoardAsync(board.Id);
+        Assert.True(loaded!.Lanes[0].Cards[0].Todos[0].IsCompleted);
+        Assert.False(loaded.Lanes[0].Cards[0].Todos[0].IsTodaysTodo);
+    }
+
+    [Fact]
+    public async Task SetBoardTodoCompletionAsync_ClearsTodaysTodo_WhenCompleted()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        var todo = await _service.AddBoardTodoAsync(board.Id, "Board today task");
+
+        await _service.SetBoardTodaysTodoAsync(board.Id, todo.Id, true);
+        await _service.SetBoardTodoCompletionAsync(board.Id, todo.Id, true);
+
+        var loaded = await _service.GetBoardAsync(board.Id);
+        Assert.True(loaded!.Todos[0].IsCompleted);
+        Assert.False(loaded.Todos[0].IsTodaysTodo);
+    }
+
     // ── Persistence round-trip ───────────────────────────────────
 
     [Fact]
