@@ -2,6 +2,7 @@
 @using ProjectManagementApp.Models
 @using ProjectManagementApp.Services
 @inject BoardService BoardService
+@inject IJSRuntime JS
 @rendermode InteractiveServer
 
 <PageTitle>@(board?.Name ?? "Board Manager")</PageTitle>
@@ -41,6 +42,12 @@
                             <span class="sidebar-todo-context">@todoInfo.LaneName › @todoInfo.CardTitle</span>
                         }
                     </div>
+                    @if (!todoInfo.IsBoardLevel)
+                    {
+                        <button class="btn-details" 
+                                @onclick="() => FocusCardInBoard(todoInfo)" 
+                                title="Show in board">🔍</button>
+                    }
                     @if (!todoInfo.Todo.IsCompleted)
                     {
                         <button class="btn-today-toggle @(todoInfo.Todo.IsTodaysTodo ? "active" : "")" 
@@ -286,7 +293,7 @@
                     <div class="swimlane-tasks">
                         @foreach (var card in lane.Cards.Where(c => showCompleted || !c.IsCompleted).OrderBy(c => c.IsCompleted).ThenBy(c => c.Order))
                         {
-                            <div class="task-card @(card.IsCompleted ? "completed" : "") @(IsCardCollapsed(card.Id) ? "collapsed" : "")" draggable="true"
+                            <div id="card-@card.Id" class="task-card @(card.IsCompleted ? "completed" : "") @(IsCardCollapsed(card.Id) ? "collapsed" : "") @(focusedCardId == card.Id ? "focused" : "")" draggable="true"
                                  @ondragstart="() => StartDrag(lane.Id, card)"
                                  @ondragover:preventDefault
                                  @ondrop="() => Drop(lane.Id)">
@@ -309,7 +316,7 @@
                                 {
                                     @if (!string.IsNullOrEmpty(card.Description))
                                     {
-                                        <p class="task-description">@card.Description</p>
+                                        <p class="task-description" draggable="false" @ondragstart:preventDefault @ondragstart:stopPropagation>@card.Description</p>
                                     }
                                     @if (card.Todos.Any())
                                     {
@@ -695,6 +702,23 @@
 
     .btn-today-toggle.active {
         opacity: 1;
+    }
+
+    .btn-details {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 13px;
+        padding: 2px 4px;
+        border-radius: 4px;
+        opacity: 0.3;
+        transition: opacity 0.2s;
+        flex-shrink: 0;
+    }
+
+    .btn-details:hover {
+        opacity: 0.9;
+        background: var(--bg-hover);
     }
 
     .sidebar-empty {
@@ -1218,6 +1242,18 @@
         padding: 8px 12px;
     }
 
+    .task-card.focused {
+        outline: 2px solid var(--accent-primary);
+        outline-offset: 2px;
+        animation: card-focus-pulse 2s ease-out;
+    }
+
+    @@keyframes card-focus-pulse {
+        0% { box-shadow: 0 0 0 4px rgba(88, 166, 255, 0.5); }
+        50% { box-shadow: 0 0 0 8px rgba(88, 166, 255, 0.2); }
+        100% { box-shadow: 0 0 0 0 rgba(88, 166, 255, 0); }
+    }
+
     .task-header {
         display: flex;
         align-items: center;
@@ -1281,6 +1317,8 @@
         color: var(--text-secondary);
         font-size: 13px;
         margin: 0 0 8px 0;
+        user-select: text;
+        cursor: text;
     }
 
     .todo-list {
@@ -1733,6 +1771,9 @@
 
     // Collapsed cards
     private HashSet<Guid> collapsedCardIds = new();
+
+    // Focused card (from sidebar details click)
+    private Guid? focusedCardId;
 
     // Notes expansion
     private HashSet<Guid> expandedNotesCardIds = new();
@@ -2295,6 +2336,40 @@
             await BoardService.SetTodaysTodoAsync(board.Id, laneId, cardId, todo.Id, !todo.IsTodaysTodo);
             board = await BoardService.GetBoardAsync(board.Id);
         }
+    }
+
+    // Focus card from sidebar
+    private async Task FocusCardInBoard(TodoInfo todoInfo)
+    {
+        if (todoInfo.IsBoardLevel) return;
+
+        // Expand the card if collapsed
+        collapsedCardIds.Remove(todoInfo.CardId);
+
+        // If the card is completed but we're hiding completed, show completed cards
+        var card = board?.Lanes.SelectMany(l => l.Cards).FirstOrDefault(c => c.Id == todoInfo.CardId);
+        if (card is { IsCompleted: true } && !showCompleted)
+        {
+            showCompleted = true;
+        }
+
+        // Set focused card for highlight
+        focusedCardId = todoInfo.CardId;
+
+        // Re-render, then scroll
+        StateHasChanged();
+        await Task.Yield();
+        await JS.InvokeVoidAsync("scrollToCard", $"card-{todoInfo.CardId}");
+
+        // Clear the highlight after animation
+        _ = ClearFocusAfterDelay();
+    }
+
+    private async Task ClearFocusAfterDelay()
+    {
+        await Task.Delay(2000);
+        focusedCardId = null;
+        StateHasChanged();
     }
 
     // Notes methods
