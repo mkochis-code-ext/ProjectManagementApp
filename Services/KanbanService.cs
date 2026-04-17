@@ -302,7 +302,7 @@ public class BoardService
     }
 
     // Todo operations
-    public async Task<TodoItem> AddTodoAsync(Guid boardId, Guid laneId, Guid cardId, string text)
+    public async Task<TodoItem> AddTodoAsync(Guid boardId, Guid laneId, Guid cardId, string text, bool isTodaysTodo = false)
     {
         var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
         var lane = board?.Lanes.FirstOrDefault(l => l.Id == laneId);
@@ -312,7 +312,8 @@ public class BoardService
             var todo = new TodoItem
             {
                 Text = text,
-                Order = card.Todos.Count
+                Order = card.Todos.Count,
+                IsTodaysTodo = isTodaysTodo
             };
             card.Todos.Add(todo);
             board!.LastModified = DateTime.UtcNow;
@@ -367,7 +368,7 @@ public class BoardService
     }
 
     // Board-level todo operations
-    public async Task<TodoItem> AddBoardTodoAsync(Guid boardId, string text)
+    public async Task<TodoItem> AddBoardTodoAsync(Guid boardId, string text, bool isTodaysTodo = false)
     {
         var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
         if (board != null)
@@ -375,7 +376,8 @@ public class BoardService
             var todo = new TodoItem
             {
                 Text = text,
-                Order = board.Todos.Count
+                Order = board.Todos.Count,
+                IsTodaysTodo = isTodaysTodo
             };
             board.Todos.Add(todo);
             board.LastModified = DateTime.UtcNow;

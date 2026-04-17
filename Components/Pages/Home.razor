@@ -10,20 +10,15 @@
 <div class="app-layout">
     <aside class="todo-sidebar">
         <div class="sidebar-header">
-            <h2>@(showCompletedTodos ? "All" : "Active") @(board?.TodoLabel ?? "Todo")s</h2>
-            <span class="todo-count">@GetSidebarTodos().Count()</span>
+            <h2>@(showCompleted ? "All" : "Active") @(board?.TodoLabel ?? "Todo")s</h2>
+            <span class="todo-count">@GetSidebarTodos().Count(t => !t.Todo.IsCompleted)</span>
         </div>
         <div class="sidebar-actions">
             <button class="btn-add-quick-todo" @onclick="ShowQuickAddTodoPanel" disabled="@(board == null)" title="Add @(board?.TodoLabel ?? "Todo")">
                 + Add @(board?.TodoLabel ?? "Todo")
             </button>
         </div>
-        <div class="sidebar-toggle">
-            <label class="show-completed-todos">
-                <input type="checkbox" @bind="showCompletedTodos" />
-                Show Completed
-            </label>
-        </div>
+
         <div class="sidebar-todos">
             @foreach (var todoInfo in GetSidebarTodos())
             {
@@ -59,7 +54,7 @@
             @if (!GetSidebarTodos().Any())
             {
                 <div class="sidebar-empty">
-                    <span>No @(showCompletedTodos ? "" : "active ")@(board?.TodoLabel?.ToLower() ?? "todo")s</span>
+                    <span>No @(showCompleted ? "" : "active ")@(board?.TodoLabel?.ToLower() ?? "todo")s</span>
                 </div>
             }
         </div>
@@ -106,10 +101,9 @@
             </div>
         </div>
         <div class="header-controls">
-            <label class="show-completed">
-                <input type="checkbox" @bind="showCompleted" />
-                Show Completed @(board?.CardLabel ?? "Card")
-            </label>
+            <button class="btn-show-completed" @onclick="() => showCompleted = !showCompleted">
+                @(showCompleted ? "Hide Completed" : "Show Completed")
+            </button>
             <button class="btn-collapse-all" @onclick="ToggleCollapseAll" disabled="@(board == null || !board.Lanes.Any(l => l.Cards.Any()))" title="@(AreAllCardsCollapsed() ? "Expand All" : "Collapse All")">
                 <span class="collapse-all-icon @(AreAllCardsCollapsed() ? "collapsed" : "")">▼</span>
                 @(AreAllCardsCollapsed() ? "Expand All" : "Collapse All")
@@ -241,7 +235,12 @@
                         }
                     </select>
                 </div>
-                <input @ref="quickTodoTextInput" type="text" placeholder="@(board?.TodoLabel ?? "Todo") text" @bind="quickTodoText" @bind:event="oninput" class="modal-input" />
+                <div class="todo-input-row">
+                    <input @ref="quickTodoTextInput" type="text" placeholder="@(board?.TodoLabel ?? "Todo") text" @bind="quickTodoText" @bind:event="oninput" class="modal-input todo-text-input" />
+                    <button type="button" class="btn-today-modal @(quickTodoIsTodaysTodo ? "active" : "")" 
+                            @onclick="() => quickTodoIsTodaysTodo = !quickTodoIsTodaysTodo" 
+                            title="@(quickTodoIsTodaysTodo ? "Remove from Today" : "Mark as Today's Todo")">⭐</button>
+                </div>
                 @if (showQuickTodoValidation && string.IsNullOrWhiteSpace(quickTodoText))
                 {
                     <span class="validation-error">@(board?.TodoLabel ?? "Todo") text is required</span>
@@ -307,7 +306,7 @@
                                         <span class="collapsed-summary">
                                             @if (card.Todos.Any())
                                             {
-                                                <span class="todo-badge">@card.Todos.Count(t => t.IsCompleted)/@card.Todos.Count</span>
+                                                <span class="todo-badge">@card.Todos.Count(t => !t.IsCompleted) active</span>
                                             }
                                         </span>
                                     }
@@ -318,13 +317,13 @@
                                     {
                                         <p class="task-description" draggable="false" @ondragstart:preventDefault @ondragstart:stopPropagation>@card.Description</p>
                                     }
-                                    @if (card.Todos.Any())
+                                    @if (card.Todos.Any(t => showCompleted || !t.IsCompleted))
                                     {
                                         <div class="todo-list">
                                             <div class="todo-header">
-                                                <span>@(board?.TodoLabel ?? "Todo")s (@card.Todos.Count(t => t.IsCompleted)/@card.Todos.Count)</span>
+                                                <span>@(board?.TodoLabel ?? "Todo")s (@card.Todos.Count(t => !t.IsCompleted) active)</span>
                                             </div>
-                                            @foreach (var todo in card.Todos.OrderByDescending(t => t.IsTodaysTodo && !t.IsCompleted).ThenBy(t => t.Order))
+                                            @foreach (var todo in card.Todos.Where(t => showCompleted || !t.IsCompleted).OrderByDescending(t => t.IsTodaysTodo && !t.IsCompleted).ThenBy(t => t.Order))
                                             {
                                                 <div class="todo-item @(todo.IsCompleted ? "completed" : "") @(todo.IsTodaysTodo && !todo.IsCompleted ? "todays-todo" : "")">
                                                     <input type="checkbox" checked="@todo.IsCompleted" 
@@ -559,24 +558,7 @@
         flex-shrink: 0;
     }
 
-    .sidebar-toggle {
-        padding: 8px 12px;
-        border-bottom: 1px solid var(--border-color);
-        flex-shrink: 0;
-    }
 
-    .show-completed-todos {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        cursor: pointer;
-        color: var(--text-secondary);
-        font-size: 13px;
-    }
-
-    .show-completed-todos input[type="checkbox"] {
-        accent-color: var(--accent-primary);
-    }
 
     .btn-add-quick-todo {
         width: 100%;
@@ -702,6 +684,40 @@
 
     .btn-today-toggle.active {
         opacity: 1;
+    }
+
+    .todo-input-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 16px;
+    }
+
+    .todo-input-row .todo-text-input {
+        flex: 1;
+        margin-bottom: 0;
+    }
+
+    .btn-today-modal {
+        background: none;
+        border: 2px solid var(--border-color);
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 18px;
+        padding: 8px 12px;
+        opacity: 0.4;
+        transition: all 0.2s;
+    }
+
+    .btn-today-modal:hover {
+        opacity: 0.8;
+        border-color: var(--btn-reactivate-color);
+    }
+
+    .btn-today-modal.active {
+        opacity: 1;
+        border-color: var(--btn-reactivate-color);
+        background: rgba(210, 153, 34, 0.15);
     }
 
     .btn-details {
@@ -1110,12 +1126,23 @@
         align-items: center;
     }
 
-    .show-completed {
+    .btn-show-completed {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
+        padding: 6px 12px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 5px;
         cursor: pointer;
+        font-size: 13px;
         color: var(--text-secondary);
+        transition: background-color 0.2s;
+    }
+
+    .btn-show-completed:hover {
+        background: var(--bg-hover);
+        color: var(--text-primary);
     }
 
     .btn-collapse-all {
@@ -1695,8 +1722,7 @@
 @code {
     private List<Board> allBoards = new();
     private Board? board;
-    private bool showCompleted = true;
-    private bool showCompletedTodos = false;
+    private bool showCompleted = false;
     private string dataFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BoardCollection.json");
 
     // Backup
@@ -1761,6 +1787,7 @@
     private Guid quickTodoLaneId;
     private Guid quickTodoCardId;
     private string quickTodoText = "";
+    private bool quickTodoIsTodaysTodo = false;
     private bool showQuickTodoValidation = false;
     private ElementReference quickTodoTextInput;
     private bool shouldFocusQuickTodoInput = false;
@@ -1789,6 +1816,16 @@
     {
         allBoards = await BoardService.GetAllBoardsAsync();
         board = await BoardService.GetLastOpenedBoardAsync();
+        CollapseAllCards();
+    }
+
+    private void CollapseAllCards()
+    {
+        if (board == null) return;
+        foreach (var card in board.Lanes.SelectMany(l => l.Cards))
+        {
+            collapsedCardIds.Add(card.Id);
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -1827,6 +1864,8 @@
         {
             board = await BoardService.GetBoardAsync(boardId);
             await BoardService.SetLastOpenedBoardAsync(boardId);
+            collapsedCardIds.Clear();
+            CollapseAllCards();
         }
     }
 
@@ -2281,14 +2320,14 @@
 
         // Board-level todos
         var boardTodos = board.Todos
-            .Where(todo => showCompletedTodos || !todo.IsCompleted)
+            .Where(todo => showCompleted || !todo.IsCompleted)
             .Select(todo => new TodoInfo(todo, Guid.Empty, "", Guid.Empty, "", true));
 
         // Card-level todos
         var cardTodos = board.Lanes
             .SelectMany(lane => lane.Cards
                 .SelectMany(card => card.Todos
-                    .Where(todo => showCompletedTodos || !todo.IsCompleted)
+                    .Where(todo => showCompleted || !todo.IsCompleted)
                     .Select(todo => new TodoInfo(todo, lane.Id, lane.Name, card.Id, card.Title, false))));
 
         return boardTodos.Concat(cardTodos)
@@ -2501,6 +2540,7 @@
         quickTodoLaneId = Guid.Empty;
         quickTodoCardId = Guid.Empty;
         quickTodoText = "";
+        quickTodoIsTodaysTodo = false;
         showQuickTodoValidation = false;
         showQuickAddTodoPanel = true;
     }
@@ -2545,12 +2585,12 @@
         if (IsBoardLevelTodo())
         {
             // Add as board-level todo
-            await BoardService.AddBoardTodoAsync(board.Id, quickTodoText.Trim());
+            await BoardService.AddBoardTodoAsync(board.Id, quickTodoText.Trim(), quickTodoIsTodaysTodo);
         }
         else
         {
             // Add as card-level todo
-            await BoardService.AddTodoAsync(board.Id, quickTodoLaneId, quickTodoCardId, quickTodoText.Trim());
+            await BoardService.AddTodoAsync(board.Id, quickTodoLaneId, quickTodoCardId, quickTodoText.Trim(), quickTodoIsTodaysTodo);
         }
         
         board = await BoardService.GetBoardAsync(board.Id);
