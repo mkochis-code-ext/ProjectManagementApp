@@ -116,6 +116,17 @@ public class BoardService
         }
     }
 
+    public async Task SetBoardViewModeAsync(Guid boardId, bool isCondensed)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        if (board != null)
+        {
+            board.IsCondensedView = isCondensed;
+            board.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+        }
+    }
+
     public async Task DeleteBoardAsync(Guid boardId)
     {
         var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);

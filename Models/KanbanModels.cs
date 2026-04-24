@@ -13,6 +13,7 @@ public class Board
     public string LaneLabel { get; set; } = "Lane";
     public string CardLabel { get; set; } = "Card";
     public string TodoLabel { get; set; } = "Todo";
+    public bool IsCondensedView { get; set; } = false;
     public List<Lane> Lanes { get; set; } = new();
     public List<TodoItem> Todos { get; set; } = new();
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

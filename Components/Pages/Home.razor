@@ -101,16 +101,24 @@
             </div>
         </div>
         <div class="header-controls">
-            <button class="btn-show-completed" @onclick="() => showCompleted = !showCompleted">
-                @(showCompleted ? "Hide Completed" : "Show Completed")
+            <button class="btn-header-action" @onclick="() => showCompleted = !showCompleted" title="@(showCompleted ? "Hide Completed" : "Show Completed")">
+                @(showCompleted ? "Hide Done" : "Show Done")
             </button>
-            <button class="btn-collapse-all" @onclick="ToggleCollapseAll" disabled="@(board == null || !board.Lanes.Any(l => l.Cards.Any()))" title="@(AreAllCardsCollapsed() ? "Expand All" : "Collapse All")">
-                <span class="collapse-all-icon @(AreAllCardsCollapsed() ? "collapsed" : "")">▼</span>
-                @(AreAllCardsCollapsed() ? "Expand All" : "Collapse All")
+            <button class="btn-header-action" @onclick="ToggleCollapseAll" disabled="@(board == null || !board.Lanes.Any(l => l.Cards.Any()))" title="@(AreAllCardsCollapsed() ? "Expand All Cards" : "Collapse All Cards")">
+                <span class="collapse-icon-sm @(AreAllCardsCollapsed() ? "collapsed" : "")">▼</span>
+                @(board?.CardLabel ?? "Card")s
             </button>
+            <button class="btn-header-action" @onclick="ToggleCollapseAllLanes" disabled="@(board == null || !board.Lanes.Any())" title="@(AreAllLanesCollapsed() ? "Expand All " + (board?.LaneLabel ?? "Lane") + "s" : "Collapse All " + (board?.LaneLabel ?? "Lane") + "s")">
+                <span class="collapse-icon-sm @(AreAllLanesCollapsed() ? "collapsed" : "")">▼</span>
+                @(board?.LaneLabel ?? "Lane")s
+            </button>
+            <select class="btn-header-action view-select" value="@(isCondensedView ? "condensed" : "normal")" @onchange="OnViewModeChanged" disabled="@(board == null)">
+                <option value="normal">Normal</option>
+                <option value="condensed">Condensed</option>
+            </select>
             @if (!showLanePanel && board != null)
             {
-                <button class="btn-add-swimlane" @onclick="ShowAddLanePanel">+ Add @(board?.LaneLabel ?? "Lane")</button>
+                <button class="btn-add-swimlane" @onclick="ShowAddLanePanel">+ @(board?.LaneLabel ?? "Lane")</button>
             }
         </div>
     </div>
@@ -269,10 +277,10 @@
 
     @if (board != null)
     {
-        <div class="kanban-board">
+        <div class="kanban-board @(isCondensedView ? "condensed" : "")">
             @foreach (var lane in board.Lanes.OrderBy(l => l.Order))
             {
-                <div class="swimlane">
+                <div class="swimlane @(IsLaneCollapsed(lane.Id) ? "collapsed" : "")">
                     <div class="swimlane-header">
                         @if (editingLaneId == lane.Id)
                         {
@@ -282,13 +290,22 @@
                         }
                         else
                         {
+                            <button class="btn-collapse-lane" @onclick="() => ToggleLaneCollapse(lane.Id)" title="@(IsLaneCollapsed(lane.Id) ? "Expand" : "Collapse")">
+                                <span class="collapse-icon @(IsLaneCollapsed(lane.Id) ? "collapsed" : "")">▼</span>
+                            </button>
                             <h3>@lane.Name</h3>
+                            @if (IsLaneCollapsed(lane.Id))
+                            {
+                                <span class="lane-collapsed-summary">@lane.Cards.Count(c => !c.IsCompleted) active</span>
+                            }
                             <div class="swimlane-actions">
                                 <button class="btn-icon" @onclick="() => StartEditLane(lane)">✎</button>
                                 <button class="btn-icon btn-delete" @onclick="() => DeleteLane(lane.Id)">🗑</button>
                             </div>
                         }
                     </div>
+                    @if (!IsLaneCollapsed(lane.Id))
+                    {
                     <div class="swimlane-tasks">
                         @foreach (var card in lane.Cards.Where(c => showCompleted || !c.IsCompleted).OrderBy(c => c.IsCompleted).ThenBy(c => c.Order))
                         {
@@ -440,6 +457,7 @@
                         }
                     </div>
                     <button class="btn-add-task" @onclick="() => ShowAddCardPanel(lane.Id)">+ Add @(board?.CardLabel ?? "Card")</button>
+                    }
                 </div>
             }
         </div>
@@ -746,12 +764,12 @@
 
     .kanban-container {
         padding: 20px;
-        height: 100vh;
         background: var(--bg-primary);
         display: flex;
         flex-direction: column;
         overflow: hidden;
         flex: 1;
+        min-height: 0;
     }
 
     .info-banner {
@@ -1122,70 +1140,65 @@
 
     .header-controls {
         display: flex;
-        gap: 20px;
+        gap: 8px;
         align-items: center;
+        flex-wrap: wrap;
     }
 
-    .btn-show-completed {
+    .btn-header-action {
         display: flex;
         align-items: center;
-        gap: 6px;
-        padding: 6px 12px;
+        gap: 4px;
+        padding: 6px 10px;
         background: var(--bg-tertiary);
         border: 1px solid var(--border-color);
         border-radius: 5px;
         cursor: pointer;
-        font-size: 13px;
-        color: var(--text-secondary);
-        transition: background-color 0.2s;
-    }
-
-    .btn-show-completed:hover {
-        background: var(--bg-hover);
-        color: var(--text-primary);
-    }
-
-    .btn-collapse-all {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 12px;
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border-color);
-        border-radius: 5px;
-        cursor: pointer;
-        font-size: 13px;
+        font-size: 12px;
         color: var(--text-secondary);
         transition: all 0.2s;
+        white-space: nowrap;
+        height: 32px;
+        box-sizing: border-box;
     }
 
-    .btn-collapse-all:hover:not(:disabled) {
+    .btn-header-action:hover:not(:disabled) {
         background: var(--bg-hover);
         color: var(--text-primary);
     }
 
-    .btn-collapse-all:disabled {
+    .btn-header-action:disabled {
         opacity: 0.5;
         cursor: not-allowed;
     }
 
-    .collapse-all-icon {
-        font-size: 10px;
+    .btn-header-action:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+    }
+
+    .collapse-icon-sm {
+        font-size: 9px;
         transition: transform 0.2s;
     }
 
-    .collapse-all-icon.collapsed {
+    .collapse-icon-sm.collapsed {
         transform: rotate(-90deg);
     }
 
+    .view-select {
+        cursor: pointer;
+    }
+
     .btn-add-swimlane {
-        padding: 10px 20px;
+        padding: 6px 12px;
         background: var(--accent-primary);
         color: white;
         border: none;
         border-radius: 5px;
         cursor: pointer;
-        font-size: 14px;
+        font-size: 12px;
+        white-space: nowrap;
     }
 
     .btn-add-swimlane:hover {
@@ -1195,17 +1208,31 @@
     .kanban-board {
         display: flex;
         gap: 20px;
-        overflow: auto;
+        overflow-x: auto;
+        overflow-y: visible;
         padding-bottom: 20px;
         padding-right: 20px;
         flex: 1;
         align-items: flex-start;
     }
 
+    .kanban-board.condensed {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        grid-auto-rows: min-content;
+        overflow-x: hidden;
+        overflow-y: auto;
+        align-items: stretch;
+    }
+
+    .kanban-board.condensed .swimlane {
+        min-width: 0;
+        max-width: none;
+    }
+
     .swimlane {
         min-width: 300px;
         max-width: 300px;
-        max-height: 100%;
         background: var(--bg-tertiary);
         border-radius: 8px;
         padding: 15px;
@@ -1216,16 +1243,49 @@
 
     .swimlane-header {
         display: flex;
-        justify-content: space-between;
-        align-items: center;
+        align-items: flex-start;
+        gap: 8px;
         margin-bottom: 15px;
         padding-bottom: 10px;
         border-bottom: 2px solid var(--border-color);
     }
 
+    .swimlane.collapsed .swimlane-header {
+        margin-bottom: 0;
+        padding-bottom: 0;
+        border-bottom: none;
+    }
+
     .swimlane-header h3 {
         margin: 0;
         color: var(--text-primary);
+        flex: 1;
+    }
+
+    .btn-collapse-lane {
+        background: none;
+        border: none;
+        padding: 2px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-muted);
+        transition: color 0.2s;
+    }
+
+    .btn-collapse-lane:hover {
+        color: var(--text-primary);
+    }
+
+    .lane-collapsed-summary {
+        background: var(--bg-hover);
+        color: var(--text-secondary);
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 500;
+        margin-right: auto;
     }
 
     .swimlane-actions {
@@ -1239,7 +1299,6 @@
         flex-direction: column;
         gap: 10px;
         min-height: 50px;
-        overflow-y: auto;
     }
 
     .task-card {
@@ -1799,6 +1858,12 @@
     // Collapsed cards
     private HashSet<Guid> collapsedCardIds = new();
 
+    // Collapsed lanes
+    private HashSet<Guid> collapsedLaneIds = new();
+
+    // Condensed view toggle
+    private bool isCondensedView = false;
+
     // Focused card (from sidebar details click)
     private Guid? focusedCardId;
 
@@ -1817,6 +1882,7 @@
         allBoards = await BoardService.GetAllBoardsAsync();
         board = await BoardService.GetLastOpenedBoardAsync();
         CollapseAllCards();
+        isCondensedView = board?.IsCondensedView ?? false;
     }
 
     private void CollapseAllCards()
@@ -1865,7 +1931,9 @@
             board = await BoardService.GetBoardAsync(boardId);
             await BoardService.SetLastOpenedBoardAsync(boardId);
             collapsedCardIds.Clear();
+            collapsedLaneIds.Clear();
             CollapseAllCards();
+            isCondensedView = board?.IsCondensedView ?? false;
         }
     }
 
@@ -2194,6 +2262,20 @@
 
     private bool IsCardCollapsed(Guid cardId) => collapsedCardIds.Contains(cardId);
 
+    private bool IsLaneCollapsed(Guid laneId) => collapsedLaneIds.Contains(laneId);
+
+    private void ToggleLaneCollapse(Guid laneId)
+    {
+        if (collapsedLaneIds.Contains(laneId))
+        {
+            collapsedLaneIds.Remove(laneId);
+        }
+        else
+        {
+            collapsedLaneIds.Add(laneId);
+        }
+    }
+
     private bool AreAllCardsCollapsed()
     {
         if (board == null) return false;
@@ -2222,6 +2304,46 @@
             {
                 collapsedCardIds.Add(cardId);
             }
+        }
+    }
+
+    private bool AreAllLanesCollapsed()
+    {
+        if (board == null) return false;
+        var allLaneIds = board.Lanes.Select(l => l.Id).ToList();
+        return allLaneIds.Count > 0 && allLaneIds.All(id => collapsedLaneIds.Contains(id));
+    }
+
+    private void ToggleCollapseAllLanes()
+    {
+        if (board == null) return;
+        
+        var allLaneIds = board.Lanes.Select(l => l.Id).ToList();
+        
+        if (AreAllLanesCollapsed())
+        {
+            // Expand all lanes
+            foreach (var laneId in allLaneIds)
+            {
+                collapsedLaneIds.Remove(laneId);
+            }
+        }
+        else
+        {
+            // Collapse all lanes
+            foreach (var laneId in allLaneIds)
+            {
+                collapsedLaneIds.Add(laneId);
+            }
+        }
+    }
+
+    private async Task OnViewModeChanged(ChangeEventArgs e)
+    {
+        isCondensedView = e.Value?.ToString() == "condensed";
+        if (board != null)
+        {
+            await BoardService.SetBoardViewModeAsync(board.Id, isCondensedView);
         }
     }
 
