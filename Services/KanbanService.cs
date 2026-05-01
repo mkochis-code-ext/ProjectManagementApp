@@ -40,7 +40,17 @@ public class BoardService
                     {
                         card.Notes ??= string.Empty;
                         card.Links ??= new List<CardLink>();
+                        // Migrate todos: ensure Notes exist
+                        foreach (var todo in card.Todos)
+                        {
+                            todo.Notes ??= string.Empty;
+                        }
                     }
+                }
+                // Migrate board-level todos: ensure Notes exist
+                foreach (var todo in board.Todos)
+                {
+                    todo.Notes ??= string.Empty;
                 }
             }
         }
@@ -313,7 +323,7 @@ public class BoardService
     }
 
     // Todo operations
-    public async Task<TodoItem> AddTodoAsync(Guid boardId, Guid laneId, Guid cardId, string text, bool isTodaysTodo = false)
+    public async Task<TodoItem> AddTodoAsync(Guid boardId, Guid laneId, Guid cardId, string text, bool isTodaysTodo = false, string notes = "")
     {
         var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
         var lane = board?.Lanes.FirstOrDefault(l => l.Id == laneId);
@@ -324,7 +334,8 @@ public class BoardService
             {
                 Text = text,
                 Order = card.Todos.Count,
-                IsTodaysTodo = isTodaysTodo
+                IsTodaysTodo = isTodaysTodo,
+                Notes = notes
             };
             card.Todos.Add(todo);
             board!.LastModified = DateTime.UtcNow;
@@ -379,7 +390,7 @@ public class BoardService
     }
 
     // Board-level todo operations
-    public async Task<TodoItem> AddBoardTodoAsync(Guid boardId, string text, bool isTodaysTodo = false)
+    public async Task<TodoItem> AddBoardTodoAsync(Guid boardId, string text, bool isTodaysTodo = false, string notes = "")
     {
         var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
         if (board != null)
@@ -388,7 +399,8 @@ public class BoardService
             {
                 Text = text,
                 Order = board.Todos.Count,
-                IsTodaysTodo = isTodaysTodo
+                IsTodaysTodo = isTodaysTodo,
+                Notes = notes
             };
             board.Todos.Add(todo);
             board.LastModified = DateTime.UtcNow;
@@ -446,6 +458,33 @@ public class BoardService
         if (todo != null)
         {
             todo.IsTodaysTodo = isTodaysTodo;
+            board!.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+        }
+    }
+
+    // Todo notes operations
+    public async Task UpdateTodoNotesAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, string notes)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        var lane = board?.Lanes.FirstOrDefault(l => l.Id == laneId);
+        var card = lane?.Cards.FirstOrDefault(c => c.Id == cardId);
+        var todo = card?.Todos.FirstOrDefault(t => t.Id == todoId);
+        if (todo != null)
+        {
+            todo.Notes = notes;
+            board!.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+        }
+    }
+
+    public async Task UpdateBoardTodoNotesAsync(Guid boardId, Guid todoId, string notes)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        var todo = board?.Todos.FirstOrDefault(t => t.Id == todoId);
+        if (todo != null)
+        {
+            todo.Notes = notes;
             board!.LastModified = DateTime.UtcNow;
             await SaveCollectionAsync();
         }

@@ -27,6 +27,32 @@
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
         }
+        
+        async function copyHtmlToClipboard(html) {
+            try {
+                const blob = new Blob([html], { type: 'text/html' });
+                const clipboardItem = new ClipboardItem({
+                    'text/html': blob,
+                    'text/plain': new Blob([html.replace(/<[^>]*>/g, '')], { type: 'text/plain' })
+                });
+                await navigator.clipboard.write([clipboardItem]);
+            } catch (err) {
+                // Fallback for browsers that don't support ClipboardItem
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = html;
+                tempDiv.style.position = 'absolute';
+                tempDiv.style.left = '-9999px';
+                document.body.appendChild(tempDiv);
+                const range = document.createRange();
+                range.selectNodeContents(tempDiv);
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+                document.execCommand('copy');
+                selection.removeAllRanges();
+                document.body.removeChild(tempDiv);
+            }
+        }
     </script>
     <script>
         if ('serviceWorker' in navigator) {

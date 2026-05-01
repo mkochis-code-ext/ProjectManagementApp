@@ -22,32 +22,47 @@
         <div class="sidebar-todos">
             @foreach (var todoInfo in GetSidebarTodos())
             {
-                <div @key="todoInfo.Todo.Id" class="sidebar-todo-item @(todoInfo.Todo.IsCompleted ? "completed" : "") @(todoInfo.IsBoardLevel ? "board-level" : "") @(todoInfo.Todo.IsTodaysTodo && !todoInfo.Todo.IsCompleted ? "todays-todo" : "")" 
+                <div @key="todoInfo.Todo.Id" class="sidebar-todo-item @(todoInfo.Todo.IsCompleted ? "completed" : "") @(todoInfo.IsBoardLevel ? "board-level" : "") @(todoInfo.Todo.IsTodaysTodo && !todoInfo.Todo.IsCompleted ? "todays-todo" : "") @(IsSidebarTodoNotesExpanded(todoInfo.Todo.Id) ? "notes-expanded" : "")" 
                      title="@(todoInfo.IsBoardLevel ? "Board-level " + (board?.TodoLabel ?? "Todo") : (board?.LaneLabel ?? "Lane") + ": " + todoInfo.LaneName + "\n" + (board?.CardLabel ?? "Card") + ": " + todoInfo.CardTitle)">
-                    <input type="checkbox" checked="@todoInfo.Todo.IsCompleted" 
-                           @onchange="() => ToggleSidebarTodo(todoInfo)" />
-                    <div class="sidebar-todo-content">
-                        <span class="sidebar-todo-text">@todoInfo.Todo.Text</span>
-                        @if (todoInfo.IsBoardLevel)
+                    <div class="sidebar-todo-main">
+                        <input type="checkbox" checked="@todoInfo.Todo.IsCompleted" 
+                               @onchange="() => ToggleSidebarTodo(todoInfo)" />
+                        <div class="sidebar-todo-content">
+                            <span class="sidebar-todo-text">@todoInfo.Todo.Text</span>
+                            @if (todoInfo.IsBoardLevel)
+                            {
+                                <span class="sidebar-todo-context board-context">📋 Board</span>
+                            }
+                            else
+                            {
+                                <span class="sidebar-todo-context">@todoInfo.LaneName › @todoInfo.CardTitle</span>
+                            }
+                        </div>
+                        <button class="btn-notes-toggle @(!string.IsNullOrWhiteSpace(todoInfo.Todo.Notes) ? "has-notes" : "")" 
+                                @onclick="() => ToggleSidebarTodoNotes(todoInfo.Todo.Id)" 
+                                title="@(IsSidebarTodoNotesExpanded(todoInfo.Todo.Id) ? "Hide Notes" : "Show Notes")">📝</button>
+                        @if (!todoInfo.IsBoardLevel)
                         {
-                            <span class="sidebar-todo-context board-context">📋 Board</span>
+                            <button class="btn-details" 
+                                    @onclick="() => FocusCardInBoard(todoInfo)" 
+                                    title="Show in board">🔍</button>
                         }
-                        else
+                        @if (!todoInfo.Todo.IsCompleted)
                         {
-                            <span class="sidebar-todo-context">@todoInfo.LaneName › @todoInfo.CardTitle</span>
+                            <button class="btn-today-toggle @(todoInfo.Todo.IsTodaysTodo ? "active" : "")" 
+                                    @onclick="() => ToggleTodaysTodo(todoInfo)" 
+                                    title="@(todoInfo.Todo.IsTodaysTodo ? "Remove from Today" : "Add to Today")">⭐</button>
                         }
                     </div>
-                    @if (!todoInfo.IsBoardLevel)
+                    @if (IsSidebarTodoNotesExpanded(todoInfo.Todo.Id))
                     {
-                        <button class="btn-details" 
-                                @onclick="() => FocusCardInBoard(todoInfo)" 
-                                title="Show in board">🔍</button>
-                    }
-                    @if (!todoInfo.Todo.IsCompleted)
-                    {
-                        <button class="btn-today-toggle @(todoInfo.Todo.IsTodaysTodo ? "active" : "")" 
-                                @onclick="() => ToggleTodaysTodo(todoInfo)" 
-                                title="@(todoInfo.Todo.IsTodaysTodo ? "Remove from Today" : "Add to Today")">⭐</button>
+                        <div class="sidebar-todo-notes">
+                            <textarea class="sidebar-notes-textarea" 
+                                      placeholder="Add notes..."
+                                      value="@todoInfo.Todo.Notes"
+                                      @oninput="e => OnSidebarTodoNotesInput(todoInfo.Todo.Id, e)"
+                                      @onblur="() => SaveSidebarTodoNotes(todoInfo)"></textarea>
+                        </div>
                     }
                 </div>
             }
@@ -116,6 +131,9 @@
                 <option value="normal">Normal</option>
                 <option value="condensed">Condensed</option>
             </select>
+            <button class="btn-header-action btn-report" @onclick="GenerateWeeklyReport" disabled="@(board == null)" title="Generate Weekly Report">
+                📊 Report
+            </button>
             @if (!showLanePanel && board != null)
             {
                 <button class="btn-add-swimlane" @onclick="ShowAddLanePanel">+ @(board?.LaneLabel ?? "Lane")</button>
@@ -253,6 +271,10 @@
                 {
                     <span class="validation-error">@(board?.TodoLabel ?? "Todo") text is required</span>
                 }
+                <div class="form-group">
+                    <label>Notes <span class="optional-label">(optional)</span></label>
+                    <textarea placeholder="Add notes..." @bind="quickTodoNotes" class="modal-textarea quick-todo-notes"></textarea>
+                </div>
                 @if (showQuickTodoValidation && IsPartialSelection())
                 {
                     <span class="validation-error">Please select both a @(board?.LaneLabel ?? "Lane") and @(board?.CardLabel ?? "Card"), or leave both empty for a board-level @(board?.TodoLabel?.ToLower() ?? "todo")</span>
@@ -271,6 +293,82 @@
                     <button type="button" class="btn-cancel" @onclick="CloseQuickAddTodoPanel">Cancel</button>
                     <button type="button" class="btn-save" @onclick="AddQuickTodo">Add @(board?.TodoLabel ?? "Todo")</button>
                 </div>
+            </div>
+        </div>
+    }
+
+    @* Report Configuration Modal *@
+    @if (showReportConfigPanel)
+    {
+        <div class="modal-backdrop" @onclick="CloseReportConfigPanel"></div>
+        <div class="modal-dialog" @onkeydown="HandleReportConfigModalKeyDown">
+            <div class="modal-content">
+                <h3>📊 Report Options</h3>
+                <div class="form-group">
+                    <label>Date Range</label>
+                    <select @bind="reportDateRangeOption" class="modal-select">
+                        <option value="week">This Work Week (Since Sunday)</option>
+                        <option value="lastweek">Last 7 Days</option>
+                        <option value="twoweeks">Last 14 Days</option>
+                        <option value="month">Last 30 Days</option>
+                        <option value="custom">Custom Range</option>
+                        <option value="all">All Time (No Date Filter)</option>
+                    </select>
+                </div>
+                @if (reportDateRangeOption == "custom")
+                {
+                    <div class="form-group date-range-inputs">
+                        <div class="date-input-group">
+                            <label>From</label>
+                            <input type="date" @bind="reportCustomStartDate" class="modal-input date-input" />
+                        </div>
+                        <div class="date-input-group">
+                            <label>To</label>
+                            <input type="date" @bind="reportCustomEndDate" class="modal-input date-input" />
+                        </div>
+                    </div>
+                }
+                <div class="report-options-section">
+                    <label class="section-label">Include in Report</label>
+                    <label class="checkbox-option">
+                        <input type="checkbox" @bind="reportIncludeNotes" />
+                        <span>Notes</span>
+                    </label>
+                    <label class="checkbox-option">
+                        <input type="checkbox" @bind="reportIncludeLinks" />
+                        <span>Links</span>
+                    </label>
+                </div>
+                <div class="modal-buttons">
+                    <button type="button" class="btn-cancel" @onclick="CloseReportConfigPanel">Cancel</button>
+                    <button type="button" class="btn-save" @onclick="GenerateReportWithOptions">Generate Report</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* Weekly Report Modal *@
+    @if (showReportPanel)
+    {
+        <div class="modal-backdrop" @onclick="CloseReportPanel"></div>
+        <div class="modal-dialog modal-report" @onkeydown="HandleReportModalKeyDown">
+            <div class="modal-content">
+                <h3>📊 Report</h3>
+                <p class="report-date-range">@reportDateRange</p>
+                <div class="report-content-wrapper">
+                    <div class="report-html-content">
+                        @((MarkupString)reportHtmlContent)
+                    </div>
+                </div>
+                <div class="modal-buttons">
+                    <button type="button" class="btn-cancel" @onclick="CloseReportPanel">Close</button>
+                    <button type="button" class="btn-secondary" @onclick="CopyReportToClipboard">📋 Copy as Text</button>
+                    <button type="button" class="btn-save" @onclick="CopyReportAsHtml">📧 Copy for Email</button>
+                </div>
+                @if (!string.IsNullOrEmpty(reportCopyMessage))
+                {
+                    <span class="report-copy-message">@reportCopyMessage</span>
+                }
             </div>
         </div>
     }
@@ -342,18 +440,35 @@
                                             </div>
                                             @foreach (var todo in card.Todos.Where(t => showCompleted || !t.IsCompleted).OrderByDescending(t => t.IsTodaysTodo && !t.IsCompleted).ThenBy(t => t.Order))
                                             {
-                                                <div class="todo-item @(todo.IsCompleted ? "completed" : "") @(todo.IsTodaysTodo && !todo.IsCompleted ? "todays-todo" : "")">
-                                                    <input type="checkbox" checked="@todo.IsCompleted" 
-                                                           @onchange="() => ToggleTodo(lane.Id, card.Id, todo)" />
-                                                    <span class="todo-text">@todo.Text</span>
-                                                    @if (!todo.IsCompleted)
-                                                    {
-                                                        <button class="btn-icon btn-today-inline @(todo.IsTodaysTodo ? "active" : "")" 
-                                                                @onclick="() => ToggleCardTodaysTodo(lane.Id, card.Id, todo)" 
+                                                <div class="todo-item-wrapper @(IsCardTodoNotesExpanded(todo.Id) ? "notes-expanded" : "")">
+                                                    <div class="todo-item @(todo.IsCompleted ? "completed" : "") @(todo.IsTodaysTodo && !todo.IsCompleted ? "todays-todo" : "")">
+                                                        <input type="checkbox" checked="@todo.IsCompleted" 
+                                                               @onchange="() => ToggleTodo(lane.Id, card.Id, todo)" />
+                                                        <span class="todo-text">@todo.Text</span>
+                                                        <button class="btn-icon btn-notes-inline @(!string.IsNullOrWhiteSpace(todo.Notes) ? "has-notes" : "")" 
+                                                                @onclick="() => ToggleCardTodoNotes(todo.Id)" 
                                                                 @onclick:stopPropagation="true" 
-                                                                title="@(todo.IsTodaysTodo ? "Remove from Today" : "Add to Today")">⭐</button>
+                                                                title="@(IsCardTodoNotesExpanded(todo.Id) ? "Hide Notes" : "Show Notes")">📝</button>
+                                                        @if (!todo.IsCompleted)
+                                                        {
+                                                            <button class="btn-icon btn-today-inline @(todo.IsTodaysTodo ? "active" : "")" 
+                                                                    @onclick="() => ToggleCardTodaysTodo(lane.Id, card.Id, todo)" 
+                                                                    @onclick:stopPropagation="true" 
+                                                                    title="@(todo.IsTodaysTodo ? "Remove from Today" : "Add to Today")">⭐</button>
+                                                        }
+                                                        <button class="btn-icon btn-todo-delete" @onclick="() => DeleteTodo(lane.Id, card.Id, todo.Id)" @onclick:stopPropagation="true">×</button>
+                                                    </div>
+                                                    @if (IsCardTodoNotesExpanded(todo.Id))
+                                                    {
+                                                        <div class="todo-notes">
+                                                            <textarea class="todo-notes-textarea" 
+                                                                      placeholder="Add notes..."
+                                                                      value="@todo.Notes"
+                                                                      @oninput="e => OnCardTodoNotesInput(todo.Id, e)"
+                                                                      @onblur="() => SaveCardTodoNotes(lane.Id, card.Id, todo.Id)"
+                                                                      @onclick:stopPropagation="true"></textarea>
+                                                        </div>
                                                     }
-                                                    <button class="btn-icon btn-todo-delete" @onclick="() => DeleteTodo(lane.Id, card.Id, todo.Id)" @onclick:stopPropagation="true">×</button>
                                                 </div>
                                             }
                                         </div>
@@ -608,14 +723,20 @@
 
     .sidebar-todo-item {
         display: flex;
-        align-items: flex-start;
-        gap: 8px;
+        flex-direction: column;
+        gap: 0;
         padding: 10px;
         border-radius: 6px;
         margin-bottom: 4px;
         background: var(--bg-tertiary);
         cursor: default;
         transition: background-color 0.15s;
+    }
+
+    .sidebar-todo-main {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
     }
 
     .sidebar-todo-item:hover {
@@ -682,6 +803,54 @@
         border-top: 2px solid var(--btn-reactivate-color);
         border-right: 2px solid var(--btn-reactivate-color);
         border-bottom: 2px solid var(--btn-reactivate-color);
+    }
+
+    .btn-notes-toggle {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 12px;
+        padding: 2px 4px;
+        border-radius: 4px;
+        opacity: 0.3;
+        transition: opacity 0.2s;
+        flex-shrink: 0;
+    }
+
+    .btn-notes-toggle:hover {
+        opacity: 0.8;
+    }
+
+    .btn-notes-toggle.has-notes {
+        opacity: 0.8;
+    }
+
+    .sidebar-todo-notes {
+        margin-top: 8px;
+        padding-left: 24px;
+    }
+
+    .sidebar-notes-textarea {
+        width: 100%;
+        min-height: 50px;
+        padding: 6px 8px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg-card);
+        color: var(--text-primary);
+        font-size: 12px;
+        font-family: inherit;
+        resize: vertical;
+        box-sizing: border-box;
+    }
+
+    .sidebar-notes-textarea:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+    }
+
+    .sidebar-notes-textarea::placeholder {
+        color: var(--text-muted);
     }
 
     .btn-today-toggle {
@@ -852,6 +1021,11 @@
         max-width: 500px;
     }
 
+    .modal-dialog.modal-report {
+        max-width: 700px;
+        max-height: 90vh;
+    }
+
     .modal-content {
         background: var(--bg-secondary);
         border-radius: 12px;
@@ -980,6 +1154,11 @@
         color: var(--text-primary);
     }
 
+    .modal-textarea.quick-todo-notes {
+        min-height: 60px;
+        font-size: 14px;
+    }
+
     .modal-textarea:focus {
         outline: none;
         border-color: var(--accent-primary);
@@ -1020,8 +1199,225 @@
         background: var(--btn-cancel-hover);
     }
 
+    .modal-buttons .btn-secondary {
+        padding: 12px 24px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: background-color 0.2s;
+    }
+
+    .modal-buttons .btn-secondary:hover {
+        background: var(--bg-hover);
+    }
+
     .modal-buttons .btn-save:hover {
         background: var(--accent-hover);
+    }
+
+    /* Report Configuration Styles */
+    .date-range-inputs {
+        display: flex;
+        gap: 16px;
+    }
+
+    .date-input-group {
+        flex: 1;
+    }
+
+    .date-input-group label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 12px;
+        color: var(--text-secondary);
+    }
+
+    .date-input {
+        margin-bottom: 0;
+    }
+
+    .report-options-section {
+        margin-bottom: 16px;
+    }
+
+    .section-label {
+        display: block;
+        margin-bottom: 10px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-secondary);
+    }
+
+    .checkbox-option {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 0;
+        cursor: pointer;
+        font-size: 14px;
+        color: var(--text-primary);
+    }
+
+    .checkbox-option input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+        accent-color: var(--accent-primary);
+    }
+
+    /* Report Modal Styles */
+    .report-date-range {
+        color: var(--text-secondary);
+        font-size: 13px;
+        margin: -12px 0 16px 0;
+    }
+
+    .report-content-wrapper {
+        margin-bottom: 16px;
+        max-height: 50vh;
+        overflow-y: auto;
+    }
+
+    .report-html-content {
+        padding: 16px;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        font-size: 13px;
+        line-height: 1.6;
+    }
+
+    .report-html-content h4 {
+        margin: 0 0 12px 0;
+        padding-bottom: 8px;
+        border-bottom: 2px solid var(--border-color);
+        color: var(--text-primary);
+        font-size: 16px;
+    }
+
+    .report-html-content .report-period {
+        color: var(--text-secondary);
+        font-size: 12px;
+        margin-bottom: 16px;
+    }
+
+    .report-html-content .lane-section {
+        margin-bottom: 16px;
+    }
+
+    .report-html-content .lane-header {
+        font-weight: 600;
+        color: var(--accent-primary);
+        margin-bottom: 8px;
+        font-size: 14px;
+    }
+
+    .report-html-content .card-section {
+        margin-left: 20px;
+        margin-bottom: 10px;
+    }
+
+    .report-html-content .card-title {
+        font-weight: 500;
+        color: var(--text-primary);
+        margin-bottom: 4px;
+    }
+
+    .report-html-content .card-meta {
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-bottom: 4px;
+    }
+
+    .report-html-content .card-notes {
+        font-size: 12px;
+        color: var(--text-secondary);
+        font-style: italic;
+        margin: 4px 0;
+        padding: 4px 8px;
+        background: var(--bg-card);
+        border-radius: 4px;
+    }
+
+    .report-html-content .links-list {
+        margin: 6px 0;
+        padding-left: 0;
+        list-style: none;
+    }
+
+    .report-html-content .links-list li {
+        margin: 4px 0;
+    }
+
+    .report-html-content .links-list a {
+        color: var(--accent-primary);
+        text-decoration: none;
+    }
+
+    .report-html-content .links-list a:hover {
+        text-decoration: underline;
+    }
+
+    .report-html-content .todo-list {
+        margin-left: 20px;
+    }
+
+    .report-html-content .todo-item {
+        margin: 2px 0;
+    }
+
+    .report-html-content .todo-status.completed {
+        color: var(--btn-complete-color);
+    }
+
+    .report-html-content .todo-status.pending {
+        color: var(--text-muted);
+    }
+
+    .report-html-content .todo-date {
+        font-size: 11px;
+        color: var(--text-muted);
+    }
+
+    .report-html-content .todo-notes {
+        font-size: 11px;
+        color: var(--text-secondary);
+        font-style: italic;
+        margin-left: 20px;
+    }
+
+    .report-html-content .board-todos {
+        margin-top: 16px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border-color);
+    }
+
+    .report-html-content .board-todos-header {
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 8px;
+    }
+
+    .report-html-content .no-updates {
+        color: var(--text-muted);
+        font-style: italic;
+    }
+
+    .report-copy-message {
+        display: block;
+        text-align: center;
+        margin-top: 8px;
+        color: var(--btn-complete-color);
+        font-size: 13px;
+    }
+
+    .btn-report {
+        background: var(--bg-tertiary);
     }
 
     /* Responsive modal for small screens */
@@ -1421,6 +1817,10 @@
         font-weight: 500;
     }
 
+    .todo-item-wrapper {
+        margin-bottom: 2px;
+    }
+
     .todo-item {
         display: flex;
         align-items: center;
@@ -1440,6 +1840,21 @@
         border-radius: 4px;
         padding: 4px 6px;
         background: rgba(210, 153, 34, 0.08);
+    }
+
+    .btn-notes-inline {
+        opacity: 0.3;
+        font-size: 10px;
+        padding: 0 2px;
+        transition: opacity 0.2s;
+    }
+
+    .todo-item:hover .btn-notes-inline {
+        opacity: 0.6;
+    }
+
+    .btn-notes-inline.has-notes {
+        opacity: 0.8;
     }
 
     .btn-today-inline {
@@ -1482,6 +1897,33 @@
 
     .btn-todo-delete:hover {
         color: var(--validation-error);
+    }
+
+    .todo-notes {
+        padding: 4px 0 4px 20px;
+    }
+
+    .todo-notes-textarea {
+        width: 100%;
+        min-height: 40px;
+        padding: 6px 8px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg-card);
+        color: var(--text-primary);
+        font-size: 11px;
+        font-family: inherit;
+        resize: vertical;
+        box-sizing: border-box;
+    }
+
+    .todo-notes-textarea:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+    }
+
+    .todo-notes-textarea::placeholder {
+        color: var(--text-muted);
     }
 
     .add-todo-inline {
@@ -1846,10 +2288,26 @@
     private Guid quickTodoLaneId;
     private Guid quickTodoCardId;
     private string quickTodoText = "";
+    private string quickTodoNotes = "";
     private bool quickTodoIsTodaysTodo = false;
     private bool showQuickTodoValidation = false;
     private ElementReference quickTodoTextInput;
     private bool shouldFocusQuickTodoInput = false;
+
+    // Report configuration panel
+    private bool showReportConfigPanel = false;
+    private string reportDateRangeOption = "week";
+    private DateTime reportCustomStartDate = DateTime.Now.AddDays(-7).Date;
+    private DateTime reportCustomEndDate = DateTime.Now.Date;
+    private bool reportIncludeNotes = false;
+    private bool reportIncludeLinks = false;
+
+    // Report panel
+    private bool showReportPanel = false;
+    private string reportContent = "";
+    private string reportHtmlContent = "";
+    private string reportDateRange = "";
+    private string reportCopyMessage = "";
 
     // Drag and drop
     private Guid dragFromLaneId;
@@ -1870,6 +2328,11 @@
     // Notes expansion
     private HashSet<Guid> expandedNotesCardIds = new();
     private Dictionary<Guid, string> notesTextCache = new();
+
+    // Todo notes expansion (for sidebar and card todos)
+    private HashSet<Guid> expandedSidebarTodoNotesIds = new();
+    private HashSet<Guid> expandedCardTodoNotesIds = new();
+    private Dictionary<Guid, string> todoNotesTextCache = new();
 
     // Links expansion and adding
     private HashSet<Guid> expandedLinksCardIds = new();
@@ -2568,6 +3031,93 @@
         }
     }
 
+    // Sidebar todo notes methods
+    private bool IsSidebarTodoNotesExpanded(Guid todoId) => expandedSidebarTodoNotesIds.Contains(todoId);
+
+    private void ToggleSidebarTodoNotes(Guid todoId)
+    {
+        if (expandedSidebarTodoNotesIds.Contains(todoId))
+        {
+            expandedSidebarTodoNotesIds.Remove(todoId);
+        }
+        else
+        {
+            expandedSidebarTodoNotesIds.Add(todoId);
+            // Initialize cache with current notes
+            var todo = GetAllTodos().FirstOrDefault(t => t.Id == todoId);
+            if (todo != null)
+            {
+                todoNotesTextCache[todoId] = todo.Notes;
+            }
+        }
+    }
+
+    private void OnSidebarTodoNotesInput(Guid todoId, ChangeEventArgs e)
+    {
+        todoNotesTextCache[todoId] = e.Value?.ToString() ?? "";
+    }
+
+    private async Task SaveSidebarTodoNotes(TodoInfo todoInfo)
+    {
+        if (board != null && todoNotesTextCache.TryGetValue(todoInfo.Todo.Id, out var notes))
+        {
+            if (todoInfo.IsBoardLevel)
+            {
+                await BoardService.UpdateBoardTodoNotesAsync(board.Id, todoInfo.Todo.Id, notes);
+            }
+            else
+            {
+                await BoardService.UpdateTodoNotesAsync(board.Id, todoInfo.LaneId, todoInfo.CardId, todoInfo.Todo.Id, notes);
+            }
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    // Card todo notes methods
+    private bool IsCardTodoNotesExpanded(Guid todoId) => expandedCardTodoNotesIds.Contains(todoId);
+
+    private void ToggleCardTodoNotes(Guid todoId)
+    {
+        if (expandedCardTodoNotesIds.Contains(todoId))
+        {
+            expandedCardTodoNotesIds.Remove(todoId);
+        }
+        else
+        {
+            expandedCardTodoNotesIds.Add(todoId);
+            // Initialize cache with current notes
+            var todo = GetAllTodos().FirstOrDefault(t => t.Id == todoId);
+            if (todo != null)
+            {
+                todoNotesTextCache[todoId] = todo.Notes;
+            }
+        }
+    }
+
+    private void OnCardTodoNotesInput(Guid todoId, ChangeEventArgs e)
+    {
+        todoNotesTextCache[todoId] = e.Value?.ToString() ?? "";
+    }
+
+    private async Task SaveCardTodoNotes(Guid laneId, Guid cardId, Guid todoId)
+    {
+        if (board != null && todoNotesTextCache.TryGetValue(todoId, out var notes))
+        {
+            await BoardService.UpdateTodoNotesAsync(board.Id, laneId, cardId, todoId, notes);
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    private IEnumerable<TodoItem> GetAllTodos()
+    {
+        if (board == null) return Enumerable.Empty<TodoItem>();
+        
+        var boardTodos = board.Todos;
+        var cardTodos = board.Lanes.SelectMany(l => l.Cards.SelectMany(c => c.Todos));
+        
+        return boardTodos.Concat(cardTodos);
+    }
+
     // Links methods
     private bool IsLinksExpanded(Guid cardId) => expandedLinksCardIds.Contains(cardId);
 
@@ -2662,6 +3212,7 @@
         quickTodoLaneId = Guid.Empty;
         quickTodoCardId = Guid.Empty;
         quickTodoText = "";
+        quickTodoNotes = "";
         quickTodoIsTodaysTodo = false;
         showQuickTodoValidation = false;
         showQuickAddTodoPanel = true;
@@ -2707,16 +3258,333 @@
         if (IsBoardLevelTodo())
         {
             // Add as board-level todo
-            await BoardService.AddBoardTodoAsync(board.Id, quickTodoText.Trim(), quickTodoIsTodaysTodo);
+            await BoardService.AddBoardTodoAsync(board.Id, quickTodoText.Trim(), quickTodoIsTodaysTodo, quickTodoNotes.Trim());
         }
         else
         {
             // Add as card-level todo
-            await BoardService.AddTodoAsync(board.Id, quickTodoLaneId, quickTodoCardId, quickTodoText.Trim(), quickTodoIsTodaysTodo);
+            await BoardService.AddTodoAsync(board.Id, quickTodoLaneId, quickTodoCardId, quickTodoText.Trim(), quickTodoIsTodaysTodo, quickTodoNotes.Trim());
         }
         
         board = await BoardService.GetBoardAsync(board.Id);
         CloseQuickAddTodoPanel();
+    }
+
+    // Weekly Report methods
+    private DateTime GetLastSunday()
+    {
+        var today = DateTime.Now.Date;
+        var daysSinceSunday = (int)today.DayOfWeek;
+        return today.AddDays(-daysSinceSunday);
+    }
+
+    private (DateTime start, DateTime end) GetReportDateRange()
+    {
+        var now = DateTime.Now;
+        return reportDateRangeOption switch
+        {
+            "week" => (GetLastSunday(), now),
+            "lastweek" => (now.AddDays(-7).Date, now),
+            "twoweeks" => (now.AddDays(-14).Date, now),
+            "month" => (now.AddDays(-30).Date, now),
+            "custom" => (reportCustomStartDate, reportCustomEndDate.AddDays(1).AddSeconds(-1)),
+            "all" => (DateTime.MinValue, DateTime.MaxValue),
+            _ => (GetLastSunday(), now)
+        };
+    }
+
+    private void GenerateWeeklyReport()
+    {
+        if (board == null) return;
+        
+        // Show configuration panel first
+        reportDateRangeOption = "week";
+        reportCustomStartDate = DateTime.Now.AddDays(-7).Date;
+        reportCustomEndDate = DateTime.Now.Date;
+        reportIncludeNotes = false;
+        reportIncludeLinks = false;
+        showReportConfigPanel = true;
+    }
+
+    private void CloseReportConfigPanel()
+    {
+        showReportConfigPanel = false;
+    }
+
+    private void HandleReportConfigModalKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            CloseReportConfigPanel();
+        }
+    }
+
+    private void GenerateReportWithOptions()
+    {
+        if (board == null) return;
+
+        var (startDate, endDate) = GetReportDateRange();
+        var isAllTime = reportDateRangeOption == "all";
+        
+        if (isAllTime)
+        {
+            reportDateRange = "All Time";
+        }
+        else
+        {
+            reportDateRange = $"{startDate:MMM dd, yyyy} - {endDate:MMM dd, yyyy}";
+        }
+
+        var laneLabel = board.LaneLabel;
+        var cardLabel = board.CardLabel;
+        var todoLabel = board.TodoLabel;
+
+        // Plain text builder (for clipboard)
+        var textSb = new System.Text.StringBuilder();
+        textSb.AppendLine($"Report: {board.Name}");
+        textSb.AppendLine($"Period: {reportDateRange}");
+        textSb.AppendLine(new string('=', 50));
+        textSb.AppendLine();
+
+        // HTML builder (for display)
+        var htmlSb = new System.Text.StringBuilder();
+        htmlSb.AppendLine($"<h4 style=\"margin: 0 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid #444; font-size: 16px;\">{System.Web.HttpUtility.HtmlEncode(board.Name)}</h4>");
+        htmlSb.AppendLine($"<div style=\"color: #888; font-size: 12px; margin-bottom: 16px;\">Period: {reportDateRange}</div>");
+
+        var hasAnyContent = false;
+
+        // Group by lanes (customers)
+        foreach (var lane in board.Lanes.OrderBy(l => l.Order))
+        {
+            var laneHasUpdates = false;
+            var laneTextSb = new System.Text.StringBuilder();
+            var laneHtmlSb = new System.Text.StringBuilder();
+
+            // Check cards (projects) updated in date range
+            foreach (var card in lane.Cards.OrderBy(c => c.Order))
+            {
+                var cardHasUpdates = false;
+                var cardTextSb = new System.Text.StringBuilder();
+                var cardHtmlSb = new System.Text.StringBuilder();
+
+                // Check if card was created or completed in date range
+                if (isAllTime || card.CreatedAt >= startDate)
+                {
+                    if (!isAllTime)
+                    {
+                        cardTextSb.AppendLine($"      • Created: {card.CreatedAt.ToLocalTime():MMM dd}");
+                        cardHtmlSb.AppendLine($"<div style=\"font-size: 12px; color: #888; margin-bottom: 4px;\">• Created: {card.CreatedAt.ToLocalTime():MMM dd}</div>");
+                    }
+                    cardHasUpdates = true;
+                }
+                if (card.CompletedAt.HasValue && (isAllTime || card.CompletedAt.Value >= startDate))
+                {
+                    cardTextSb.AppendLine($"      • Completed: {card.CompletedAt.Value.ToLocalTime():MMM dd}");
+                    cardHtmlSb.AppendLine($"<div style=\"font-size: 12px; color: #888; margin-bottom: 4px;\">• Completed: {card.CompletedAt.Value.ToLocalTime():MMM dd}</div>");
+                    cardHasUpdates = true;
+                }
+
+                // Include card notes if option enabled
+                if (reportIncludeNotes && !string.IsNullOrWhiteSpace(card.Notes))
+                {
+                    cardTextSb.AppendLine($"      Notes: {card.Notes}");
+                    cardHtmlSb.AppendLine($"<div style=\"font-size: 12px; color: #666; font-style: italic; margin: 4px 0; padding: 4px 8px; background: #f5f5f5; border-radius: 4px;\">{System.Web.HttpUtility.HtmlEncode(card.Notes)}</div>");
+                    cardHasUpdates = true;
+                }
+
+                // Include card links if option enabled
+                if (reportIncludeLinks && card.Links.Any())
+                {
+                    cardTextSb.AppendLine($"      Links:");
+                    cardHtmlSb.AppendLine("<ul style=\"margin: 6px 0; padding-left: 20px; list-style: disc;\">");
+                    foreach (var link in card.Links)
+                    {
+                        var linkTitle = string.IsNullOrWhiteSpace(link.Title) ? link.Url : link.Title;
+                        cardTextSb.AppendLine($"        • {linkTitle}: {link.Url}");
+                        cardHtmlSb.AppendLine($"<li style=\"margin: 4px 0;\"><a href=\"{System.Web.HttpUtility.HtmlAttributeEncode(link.Url)}\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"color: #0066cc; text-decoration: none;\">{System.Web.HttpUtility.HtmlEncode(linkTitle)}</a></li>");
+                    }
+                    cardHtmlSb.AppendLine("</ul>");
+                    cardHasUpdates = true;
+                }
+
+                // Check todos (tasks) updated in date range
+                var updatedTodos = isAllTime 
+                    ? card.Todos.OrderBy(t => t.Order).ToList()
+                    : card.Todos
+                        .Where(t => t.CreatedAt >= startDate || (t.CompletedAt.HasValue && t.CompletedAt.Value >= startDate))
+                        .OrderBy(t => t.Order)
+                        .ToList();
+
+                if (updatedTodos.Any())
+                {
+                    cardHasUpdates = true;
+                    cardTextSb.AppendLine($"      {todoLabel}s:");
+                    cardHtmlSb.AppendLine($"<div style=\"margin-left: 20px;\">");
+                    foreach (var todo in updatedTodos)
+                    {
+                        var status = todo.IsCompleted ? "✓" : "○";
+                        var statusColor = todo.IsCompleted ? "#28a745" : "#888";
+                        var dateInfo = "";
+                        var dateHtml = "";
+                        if (!isAllTime)
+                        {
+                            if (todo.CompletedAt.HasValue && todo.CompletedAt.Value >= startDate)
+                            {
+                                dateInfo = $" (completed {todo.CompletedAt.Value.ToLocalTime():MMM dd})";
+                                dateHtml = $"<span style=\"font-size: 11px; color: #888;\"> (completed {todo.CompletedAt.Value.ToLocalTime():MMM dd})</span>";
+                            }
+                            else if (todo.CreatedAt >= startDate)
+                            {
+                                dateInfo = $" (added {todo.CreatedAt.ToLocalTime():MMM dd})";
+                                dateHtml = $"<span style=\"font-size: 11px; color: #888;\"> (added {todo.CreatedAt.ToLocalTime():MMM dd})</span>";
+                            }
+                        }
+                        cardTextSb.AppendLine($"        {status} {todo.Text}{dateInfo}");
+                        cardHtmlSb.AppendLine($"<div style=\"margin: 2px 0;\"><span style=\"color: {statusColor};\">{status}</span> {System.Web.HttpUtility.HtmlEncode(todo.Text)}{dateHtml}</div>");
+                        
+                        // Include todo notes if option enabled
+                        if (reportIncludeNotes && !string.IsNullOrWhiteSpace(todo.Notes))
+                        {
+                            cardTextSb.AppendLine($"           Notes: {todo.Notes}");
+                            cardHtmlSb.AppendLine($"<div style=\"font-size: 11px; color: #666; font-style: italic; margin-left: 20px;\">{System.Web.HttpUtility.HtmlEncode(todo.Notes)}</div>");
+                        }
+                    }
+                    cardHtmlSb.AppendLine("</div>");
+                }
+
+                if (cardHasUpdates)
+                {
+                    laneHasUpdates = true;
+                    laneTextSb.AppendLine($"   • {cardLabel}: {card.Title}");
+                    laneTextSb.Append(cardTextSb.ToString());
+                    laneHtmlSb.AppendLine($"<div style=\"margin-left: 20px; margin-bottom: 10px;\"><div style=\"font-weight: 500; margin-bottom: 4px;\">• {cardLabel}: {System.Web.HttpUtility.HtmlEncode(card.Title)}</div>");
+                    laneHtmlSb.Append(cardHtmlSb.ToString());
+                    laneHtmlSb.AppendLine("</div>");
+                }
+            }
+
+            if (laneHasUpdates)
+            {
+                hasAnyContent = true;
+                textSb.AppendLine($"{laneLabel}: {lane.Name}");
+                textSb.Append(laneTextSb.ToString());
+                textSb.AppendLine();
+                htmlSb.AppendLine($"<div style=\"margin-bottom: 16px;\"><div style=\"font-weight: 600; color: #0066cc; margin-bottom: 6px; font-size: 14px;\">{laneLabel}: {System.Web.HttpUtility.HtmlEncode(lane.Name)}</div>");
+                htmlSb.Append(laneHtmlSb.ToString());
+                htmlSb.AppendLine("</div>");
+            }
+        }
+
+        // Check board-level todos
+        var updatedBoardTodos = isAllTime
+            ? board.Todos.OrderBy(t => t.Order).ToList()
+            : board.Todos
+                .Where(t => t.CreatedAt >= startDate || (t.CompletedAt.HasValue && t.CompletedAt.Value >= startDate))
+                .OrderBy(t => t.Order)
+                .ToList();
+
+        if (updatedBoardTodos.Any())
+        {
+            hasAnyContent = true;
+            textSb.AppendLine($"Board-level {todoLabel}s:");
+            htmlSb.AppendLine($"<div style=\"margin-top: 16px; padding-top: 12px; border-top: 1px solid #ddd;\"><div style=\"font-weight: 600; margin-bottom: 8px;\">Board-level {todoLabel}s</div><div style=\"margin: 8px 0 8px 8px;\">");
+            foreach (var todo in updatedBoardTodos)
+            {
+                var status = todo.IsCompleted ? "✓" : "○";
+                var statusColor = todo.IsCompleted ? "#28a745" : "#888";
+                var dateInfo = "";
+                var dateHtml = "";
+                if (!isAllTime)
+                {
+                    if (todo.CompletedAt.HasValue && todo.CompletedAt.Value >= startDate)
+                    {
+                        dateInfo = $" (completed {todo.CompletedAt.Value.ToLocalTime():MMM dd})";
+                        dateHtml = $"<span style=\"font-size: 11px; color: #888;\"> (completed {todo.CompletedAt.Value.ToLocalTime():MMM dd})</span>";
+                    }
+                    else if (todo.CreatedAt >= startDate)
+                    {
+                        dateInfo = $" (added {todo.CreatedAt.ToLocalTime():MMM dd})";
+                        dateHtml = $"<span style=\"font-size: 11px; color: #888;\"> (added {todo.CreatedAt.ToLocalTime():MMM dd})</span>";
+                    }
+                }
+                textSb.AppendLine($"  {status} {todo.Text}{dateInfo}");
+                htmlSb.AppendLine($"<div style=\"margin: 2px 0; margin-left: 20px;\"><span style=\"color: {statusColor};\">{status}</span> {System.Web.HttpUtility.HtmlEncode(todo.Text)}{dateHtml}</div>");
+                
+                // Include todo notes if option enabled
+                if (reportIncludeNotes && !string.IsNullOrWhiteSpace(todo.Notes))
+                {
+                    textSb.AppendLine($"     Notes: {todo.Notes}");
+                    htmlSb.AppendLine($"<div style=\"font-size: 11px; color: #666; font-style: italic; margin-left: 40px;\">{System.Web.HttpUtility.HtmlEncode(todo.Notes)}</div>");
+                }
+            }
+            htmlSb.AppendLine("</div></div>");
+            textSb.AppendLine();
+        }
+
+        if (!hasAnyContent)
+        {
+            textSb.AppendLine("No updates found for the selected period.");
+            htmlSb.AppendLine("<div style=\"color: #888; font-style: italic;\">No updates found for the selected period.</div>");
+        }
+
+        reportContent = textSb.ToString();
+        reportHtmlContent = htmlSb.ToString();
+        reportCopyMessage = "";
+        showReportConfigPanel = false;
+        showReportPanel = true;
+    }
+
+    private void CloseReportPanel()
+    {
+        showReportPanel = false;
+        reportCopyMessage = "";
+    }
+
+    private void HandleReportModalKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            CloseReportPanel();
+        }
+    }
+
+    private async Task CopyReportToClipboard()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", reportContent);
+            reportCopyMessage = "✓ Copied as plain text!";
+            StateHasChanged();
+            await Task.Delay(2000);
+            reportCopyMessage = "";
+            StateHasChanged();
+        }
+        catch
+        {
+            reportCopyMessage = "Failed to copy. Please select and copy manually.";
+        }
+    }
+
+    private async Task CopyReportAsHtml()
+    {
+        try
+        {
+            // Create a complete HTML document for email
+            var emailHtml = $@"<html><body style=""font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #333;"">
+{reportHtmlContent}
+</body></html>";
+            
+            await JS.InvokeVoidAsync("copyHtmlToClipboard", emailHtml);
+            reportCopyMessage = "✓ Copied as formatted HTML for email!";
+            StateHasChanged();
+            await Task.Delay(2000);
+            reportCopyMessage = "";
+            StateHasChanged();
+        }
+        catch
+        {
+            reportCopyMessage = "Failed to copy HTML. Try Copy as Text instead.";
+        }
     }
 
     // Backup method
