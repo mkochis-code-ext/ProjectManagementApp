@@ -12,6 +12,22 @@
     <Content Remove="ProjectManagementApp.Tests\**" />
     <EmbeddedResource Remove="ProjectManagementApp.Tests\**" />
     <None Remove="ProjectManagementApp.Tests\**" />
+    <Compile Remove="ProjectManagementApp.Core\**" />
+    <Content Remove="ProjectManagementApp.Core\**" />
+    <EmbeddedResource Remove="ProjectManagementApp.Core\**" />
+    <None Remove="ProjectManagementApp.Core\**" />
+    <Compile Remove="ProjectManagementApp.Api\**" />
+    <Content Remove="ProjectManagementApp.Api\**" />
+    <EmbeddedResource Remove="ProjectManagementApp.Api\**" />
+    <None Remove="ProjectManagementApp.Api\**" />
+    <Compile Remove="ProjectManagementApp.Mcp\**" />
+    <Content Remove="ProjectManagementApp.Mcp\**" />
+    <EmbeddedResource Remove="ProjectManagementApp.Mcp\**" />
+    <None Remove="ProjectManagementApp.Mcp\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="ProjectManagementApp.Core\ProjectManagementApp.Core.csproj" />
   </ItemGroup>
 
 </Project>

@@ -41,6 +41,7 @@ public class Card
     public int Order { get; set; }
     public List<TodoItem> Todos { get; set; } = new();
     public List<CardLink> Links { get; set; } = new();
+    public List<CardContact> Contacts { get; set; } = new();
 }
 
 public class CardLink
@@ -48,6 +49,14 @@ public class CardLink
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Title { get; set; } = string.Empty;
     public string Url { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class CardContact
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -61,4 +70,13 @@ public class TodoItem
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
     public int Order { get; set; }
+    public List<TodoLink> Links { get; set; } = new();
+}
+
+public class TodoLink
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Title { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

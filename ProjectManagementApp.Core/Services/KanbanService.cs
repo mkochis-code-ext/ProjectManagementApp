@@ -3,12 +3,12 @@ using ProjectManagementApp.Models;
 
 namespace ProjectManagementApp.Services;
 
-public class BoardService
+public class BoardService : IBoardService
 {
     private readonly string _filePath;
     private readonly JsonSerializerOptions _jsonOptions;
+    private readonly SemaphoreSlim _gate = new(1, 1);
     private BoardCollection _collection = new();
-    private Board? _currentBoard;
 
     public BoardService()
     {
@@ -23,48 +23,69 @@ public class BoardService
 
     public async Task<BoardCollection> LoadCollectionAsync()
     {
-        if (File.Exists(_filePath))
+        await _gate.WaitAsync();
+        try
         {
-            var json = await File.ReadAllTextAsync(_filePath);
-            _collection = JsonSerializer.Deserialize<BoardCollection>(json, _jsonOptions) ?? new BoardCollection();
-            
-            // Migrate old data: ensure all boards have required properties
-            foreach (var board in _collection.Boards)
+            if (File.Exists(_filePath))
             {
-                board.Todos ??= new List<TodoItem>();
-                
-                // Migrate cards: ensure Notes and Links exist
-                foreach (var lane in board.Lanes)
+                var json = await File.ReadAllTextAsync(_filePath);
+                _collection = JsonSerializer.Deserialize<BoardCollection>(json, _jsonOptions) ?? new BoardCollection();
+
+                // Migrate old data: ensure all boards have required properties
+                foreach (var board in _collection.Boards)
                 {
-                    foreach (var card in lane.Cards)
+                    board.Todos ??= new List<TodoItem>();
+
+                    // Migrate cards: ensure Notes and Links exist
+                    foreach (var lane in board.Lanes)
                     {
-                        card.Notes ??= string.Empty;
-                        card.Links ??= new List<CardLink>();
-                        // Migrate todos: ensure Notes exist
-                        foreach (var todo in card.Todos)
+                        foreach (var card in lane.Cards)
                         {
-                            todo.Notes ??= string.Empty;
+                            card.Notes ??= string.Empty;
+                            card.Links ??= new List<CardLink>();
+                            card.Contacts ??= new List<CardContact>();
+                            // Migrate todos: ensure Notes exist
+                            foreach (var todo in card.Todos)
+                            {
+                                todo.Notes ??= string.Empty;
+                            }
                         }
                     }
-                }
-                // Migrate board-level todos: ensure Notes exist
-                foreach (var todo in board.Todos)
-                {
-                    todo.Notes ??= string.Empty;
+                    // Migrate board-level todos: ensure Notes exist
+                    foreach (var todo in board.Todos)
+                    {
+                        todo.Notes ??= string.Empty;
+                    }
                 }
             }
+            else
+            {
+                _collection = new BoardCollection();
+            }
+            return _collection;
         }
-        else
+        finally
         {
-            _collection = new BoardCollection();
+            _gate.Release();
         }
-        return _collection;
     }
 
     public async Task SaveCollectionAsync()
     {
-        var json = JsonSerializer.Serialize(_collection, _jsonOptions);
-        await File.WriteAllTextAsync(_filePath, json);
+        await _gate.WaitAsync();
+        try
+        {
+            var json = JsonSerializer.Serialize(_collection, _jsonOptions);
+            // Atomic write: write to a temp file, then replace the target so a
+            // concurrent reader never sees a partially-written file.
+            var tempPath = _filePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            await File.WriteAllTextAsync(tempPath, json);
+            File.Move(tempPath, _filePath, overwrite: true);
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     public async Task<List<Board>> GetAllBoardsAsync()
@@ -76,20 +97,120 @@ public class BoardService
     public async Task<Board?> GetBoardAsync(Guid boardId)
     {
         await LoadCollectionAsync();
-        _currentBoard = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
-        return _currentBoard;
+        return _collection.Boards.FirstOrDefault(b => b.Id == boardId);
     }
 
     public async Task<Board?> GetLastOpenedBoardAsync()
     {
         await LoadCollectionAsync();
+        Board? board = null;
         if (_collection.LastOpenedBoardId.HasValue)
         {
-            _currentBoard = _collection.Boards.FirstOrDefault(b => b.Id == _collection.LastOpenedBoardId.Value);
+            board = _collection.Boards.FirstOrDefault(b => b.Id == _collection.LastOpenedBoardId.Value);
         }
-        _currentBoard ??= _collection.Boards.FirstOrDefault();
-        return _currentBoard;
+        board ??= _collection.Boards.FirstOrDefault();
+        return board;
     }
+
+    public async Task<List<Board>> SearchBoardsAsync(string query)
+    {
+        await LoadCollectionAsync();
+        return _collection.Boards.Where(b => Matches(b.Name, query)).ToList();
+    }
+
+    public async Task<List<LaneSearchResult>> SearchLanesAsync(string query, Guid? boardId = null)
+    {
+        await LoadCollectionAsync();
+        var results = new List<LaneSearchResult>();
+        foreach (var board in BoardsInScope(boardId))
+        {
+            foreach (var lane in board.Lanes)
+            {
+                if (Matches(lane.Name, query))
+                    results.Add(new LaneSearchResult(board.Id, board.Name, lane));
+            }
+        }
+        return results;
+    }
+
+    public async Task<List<CardSearchResult>> SearchCardsAsync(string query, Guid? boardId = null)
+    {
+        await LoadCollectionAsync();
+        var results = new List<CardSearchResult>();
+        foreach (var board in BoardsInScope(boardId))
+        {
+            foreach (var lane in board.Lanes)
+            {
+                foreach (var card in lane.Cards)
+                {
+                    if (Matches(card.Title, query))
+                        results.Add(new CardSearchResult(board.Id, board.Name, lane.Id, lane.Name, card));
+                }
+            }
+        }
+        return results;
+    }
+
+    public async Task<List<TodoSearchResult>> SearchTodosAsync(string query, Guid? boardId = null)
+    {
+        await LoadCollectionAsync();
+        var results = new List<TodoSearchResult>();
+        foreach (var board in BoardsInScope(boardId))
+        {
+            foreach (var todo in board.Todos)
+            {
+                if (Matches(todo.Text, query))
+                    results.Add(new TodoSearchResult(board.Id, board.Name, null, null, null, null, todo));
+            }
+            foreach (var lane in board.Lanes)
+            {
+                foreach (var card in lane.Cards)
+                {
+                    foreach (var todo in card.Todos)
+                    {
+                        if (Matches(todo.Text, query))
+                            results.Add(new TodoSearchResult(board.Id, board.Name, lane.Id, lane.Name, card.Id, card.Title, todo));
+                    }
+                }
+            }
+        }
+        return results;
+    }
+
+    public async Task<List<TodoSearchResult>> GetOpenTodosAsync(string query, bool todayOnly = false)
+    {
+        await LoadCollectionAsync();
+        var results = new List<TodoSearchResult>();
+        foreach (var board in _collection.Boards)
+        {
+            foreach (var todo in board.Todos)
+            {
+                if (IsOpenTodoMatch(todo, query, todayOnly))
+                    results.Add(new TodoSearchResult(board.Id, board.Name, null, null, null, null, todo));
+            }
+            foreach (var lane in board.Lanes)
+            {
+                foreach (var card in lane.Cards)
+                {
+                    foreach (var todo in card.Todos)
+                    {
+                        if (IsOpenTodoMatch(todo, query, todayOnly))
+                            results.Add(new TodoSearchResult(board.Id, board.Name, lane.Id, lane.Name, card.Id, card.Title, todo));
+                    }
+                }
+            }
+        }
+        return results;
+    }
+
+    private static bool IsOpenTodoMatch(TodoItem todo, string query, bool todayOnly) =>
+        !todo.IsCompleted && (!todayOnly || todo.IsTodaysTodo) && Matches(todo.Text, query);
+
+    private IEnumerable<Board> BoardsInScope(Guid? boardId) =>
+        boardId is null ? _collection.Boards : _collection.Boards.Where(b => b.Id == boardId.Value);
+
+    private static bool Matches(string value, string query) =>
+        string.IsNullOrWhiteSpace(query) || value.Contains(query, StringComparison.OrdinalIgnoreCase);
 
     public async Task SetLastOpenedBoardAsync(Guid boardId)
     {
@@ -322,6 +443,41 @@ public class BoardService
         }
     }
 
+    // Card contact operations
+    public async Task<CardContact> AddCardContactAsync(Guid boardId, Guid laneId, Guid cardId, string name, string email)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        var lane = board?.Lanes.FirstOrDefault(l => l.Id == laneId);
+        var card = lane?.Cards.FirstOrDefault(c => c.Id == cardId);
+        if (card != null)
+        {
+            var contact = new CardContact
+            {
+                Name = name,
+                Email = email
+            };
+            card.Contacts.Add(contact);
+            board!.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+            return contact;
+        }
+        return null!;
+    }
+
+    public async Task DeleteCardContactAsync(Guid boardId, Guid laneId, Guid cardId, Guid contactId)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        var lane = board?.Lanes.FirstOrDefault(l => l.Id == laneId);
+        var card = lane?.Cards.FirstOrDefault(c => c.Id == cardId);
+        var contact = card?.Contacts.FirstOrDefault(c => c.Id == contactId);
+        if (contact != null)
+        {
+            card!.Contacts.Remove(contact);
+            board!.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+        }
+    }
+
     // Todo operations
     public async Task<TodoItem> AddTodoAsync(Guid boardId, Guid laneId, Guid cardId, string text, bool isTodaysTodo = false, string notes = "")
     {
@@ -485,6 +641,95 @@ public class BoardService
         if (todo != null)
         {
             todo.Notes = notes;
+            board!.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+        }
+    }
+
+    // Todo text operations
+    public async Task UpdateTodoTextAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, string text)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        var lane = board?.Lanes.FirstOrDefault(l => l.Id == laneId);
+        var card = lane?.Cards.FirstOrDefault(c => c.Id == cardId);
+        var todo = card?.Todos.FirstOrDefault(t => t.Id == todoId);
+        if (todo != null)
+        {
+            todo.Text = text;
+            board!.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+        }
+    }
+
+    public async Task UpdateBoardTodoTextAsync(Guid boardId, Guid todoId, string text)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        var todo = board?.Todos.FirstOrDefault(t => t.Id == todoId);
+        if (todo != null)
+        {
+            todo.Text = text;
+            board!.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+        }
+    }
+
+    // Todo link operations (card-level todos)
+    public async Task<TodoLink> AddTodoLinkAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, string title, string url)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        var lane = board?.Lanes.FirstOrDefault(l => l.Id == laneId);
+        var card = lane?.Cards.FirstOrDefault(c => c.Id == cardId);
+        var todo = card?.Todos.FirstOrDefault(t => t.Id == todoId);
+        if (todo != null)
+        {
+            var link = new TodoLink { Title = title, Url = url };
+            todo.Links.Add(link);
+            board!.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+            return link;
+        }
+        return null!;
+    }
+
+    public async Task DeleteTodoLinkAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, Guid linkId)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        var lane = board?.Lanes.FirstOrDefault(l => l.Id == laneId);
+        var card = lane?.Cards.FirstOrDefault(c => c.Id == cardId);
+        var todo = card?.Todos.FirstOrDefault(t => t.Id == todoId);
+        var link = todo?.Links.FirstOrDefault(l => l.Id == linkId);
+        if (link != null)
+        {
+            todo!.Links.Remove(link);
+            board!.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+        }
+    }
+
+    // Todo link operations (board-level todos)
+    public async Task<TodoLink> AddBoardTodoLinkAsync(Guid boardId, Guid todoId, string title, string url)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        var todo = board?.Todos.FirstOrDefault(t => t.Id == todoId);
+        if (todo != null)
+        {
+            var link = new TodoLink { Title = title, Url = url };
+            todo.Links.Add(link);
+            board!.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+            return link;
+        }
+        return null!;
+    }
+
+    public async Task DeleteBoardTodoLinkAsync(Guid boardId, Guid todoId, Guid linkId)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        var todo = board?.Todos.FirstOrDefault(t => t.Id == todoId);
+        var link = todo?.Links.FirstOrDefault(l => l.Id == linkId);
+        if (link != null)
+        {
+            todo!.Links.Remove(link);
             board!.LastModified = DateTime.UtcNow;
             await SaveCollectionAsync();
         }

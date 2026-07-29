@@ -1,7 +1,7 @@
 @page "/"
 @using ProjectManagementApp.Models
 @using ProjectManagementApp.Services
-@inject BoardService BoardService
+@inject IBoardService BoardService
 @inject IJSRuntime JS
 @rendermode InteractiveServer
 
@@ -22,46 +22,112 @@
         <div class="sidebar-todos">
             @foreach (var todoInfo in GetSidebarTodos())
             {
-                <div @key="todoInfo.Todo.Id" class="sidebar-todo-item @(todoInfo.Todo.IsCompleted ? "completed" : "") @(todoInfo.IsBoardLevel ? "board-level" : "") @(todoInfo.Todo.IsTodaysTodo && !todoInfo.Todo.IsCompleted ? "todays-todo" : "") @(IsSidebarTodoNotesExpanded(todoInfo.Todo.Id) ? "notes-expanded" : "")" 
+                <div @key="todoInfo.Todo.Id" class="sidebar-todo-item @(todoInfo.Todo.IsCompleted ? "completed" : "") @(todoInfo.IsBoardLevel ? "board-level" : "") @(todoInfo.Todo.IsTodaysTodo && !todoInfo.Todo.IsCompleted ? "todays-todo" : "") @(IsSidebarTodoExpanded(todoInfo.Todo.Id) ? "expanded" : "")" 
                      title="@(todoInfo.IsBoardLevel ? "Board-level " + (board?.TodoLabel ?? "Todo") : (board?.LaneLabel ?? "Lane") + ": " + todoInfo.LaneName + "\n" + (board?.CardLabel ?? "Card") + ": " + todoInfo.CardTitle)">
                     <div class="sidebar-todo-main">
-                        <input type="checkbox" checked="@todoInfo.Todo.IsCompleted" 
-                               @onchange="() => ToggleSidebarTodo(todoInfo)" />
                         <div class="sidebar-todo-content">
-                            <span class="sidebar-todo-text">@todoInfo.Todo.Text</span>
-                            @if (todoInfo.IsBoardLevel)
+                            @if (editingSidebarTodoId == todoInfo.Todo.Id)
                             {
-                                <span class="sidebar-todo-context board-context">📋 Board</span>
+                                <input type="text" class="sidebar-todo-edit-input" 
+                                       @bind="editingSidebarTodoText" 
+                                       @onkeydown="e => HandleSidebarTodoEditKeyDown(e, todoInfo)" />
+                                <div class="sidebar-todo-edit-actions">
+                                    <button class="btn-icon btn-save-edit" @onclick="() => SaveSidebarTodoEdit(todoInfo)">✓</button>
+                                    <button class="btn-icon btn-cancel-edit" @onclick="CancelSidebarTodoEdit">✕</button>
+                                </div>
                             }
                             else
                             {
-                                <span class="sidebar-todo-context">@todoInfo.LaneName › @todoInfo.CardTitle</span>
+                                <span class="sidebar-todo-text" @ondblclick="() => StartEditSidebarTodo(todoInfo)">@todoInfo.Todo.Text</span>
+                                <div class="sidebar-todo-footer">
+                                    <div class="sidebar-todo-context-wrapper">
+                                        @if (todoInfo.IsBoardLevel)
+                                        {
+                                            <span class="sidebar-todo-context board-context">📋 Board</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="sidebar-todo-context">@todoInfo.LaneName › @todoInfo.CardTitle</span>
+                                        }
+                                    </div>
+                                </div>
                             }
                         </div>
-                        <button class="btn-notes-toggle @(!string.IsNullOrWhiteSpace(todoInfo.Todo.Notes) ? "has-notes" : "")" 
-                                @onclick="() => ToggleSidebarTodoNotes(todoInfo.Todo.Id)" 
-                                title="@(IsSidebarTodoNotesExpanded(todoInfo.Todo.Id) ? "Hide Notes" : "Show Notes")">📝</button>
-                        @if (!todoInfo.IsBoardLevel)
-                        {
-                            <button class="btn-details" 
-                                    @onclick="() => FocusCardInBoard(todoInfo)" 
-                                    title="Show in board">🔍</button>
-                        }
-                        @if (!todoInfo.Todo.IsCompleted)
-                        {
-                            <button class="btn-today-toggle @(todoInfo.Todo.IsTodaysTodo ? "active" : "")" 
-                                    @onclick="() => ToggleTodaysTodo(todoInfo)" 
-                                    title="@(todoInfo.Todo.IsTodaysTodo ? "Remove from Today" : "Add to Today")">⭐</button>
-                        }
+                        <div class="sidebar-todo-actions-col">
+                            <button class="btn-sidebar-complete @(todoInfo.Todo.IsCompleted ? "completed" : "")" 
+                                    @onclick="() => ToggleSidebarTodo(todoInfo)" 
+                                    title="@(todoInfo.Todo.IsCompleted ? "Mark as Incomplete" : "Mark as Complete")">✓</button>
+                            @if (!todoInfo.Todo.IsCompleted)
+                            {
+                                <button class="btn-sidebar-today @(todoInfo.Todo.IsTodaysTodo ? "active" : "")" 
+                                        @onclick="() => ToggleTodaysTodo(todoInfo)" 
+                                        title="@(todoInfo.Todo.IsTodaysTodo ? "Remove from Today" : "Add to Today")">⭐</button>
+                            }
+                            <button class="btn-sidebar-expand @(IsSidebarTodoExpanded(todoInfo.Todo.Id) ? "expanded" : "")" 
+                                    @onclick="() => ToggleSidebarTodoExpand(todoInfo.Todo.Id)" 
+                                    title="@(IsSidebarTodoExpanded(todoInfo.Todo.Id) ? "Collapse" : "Expand")">
+                                <span class="expand-chevron">▼</span>
+                            </button>
+                        </div>
                     </div>
-                    @if (IsSidebarTodoNotesExpanded(todoInfo.Todo.Id))
+                    @if (IsSidebarTodoExpanded(todoInfo.Todo.Id))
                     {
-                        <div class="sidebar-todo-notes">
-                            <textarea class="sidebar-notes-textarea" 
-                                      placeholder="Add notes..."
-                                      value="@todoInfo.Todo.Notes"
-                                      @oninput="e => OnSidebarTodoNotesInput(todoInfo.Todo.Id, e)"
-                                      @onblur="() => SaveSidebarTodoNotes(todoInfo)"></textarea>
+                        <div class="sidebar-todo-expanded">
+                            <div class="sidebar-notes-section">
+                                <div class="sidebar-notes-header">
+                                    <span class="sidebar-notes-icon">📝</span>
+                                    <span>Notes</span>
+                                    @if (!string.IsNullOrWhiteSpace(todoInfo.Todo.Notes))
+                                    {
+                                        <span class="sidebar-notes-indicator">•</span>
+                                    }
+                                </div>
+                                <textarea class="sidebar-notes-textarea" 
+                                          placeholder="Add notes..."
+                                          value="@todoInfo.Todo.Notes"
+                                          @oninput="e => OnSidebarTodoNotesInput(todoInfo.Todo.Id, e)"
+                                          @onblur="() => SaveSidebarTodoNotes(todoInfo)"></textarea>
+                            </div>
+                            <div class="sidebar-links-section">
+                                <div class="sidebar-links-header">
+                                    <span class="sidebar-links-icon">🔗</span>
+                                    <span>Links</span>
+                                    @if (todoInfo.Todo.Links.Any())
+                                    {
+                                        <span class="sidebar-links-count">(@todoInfo.Todo.Links.Count)</span>
+                                    }
+                                </div>
+                                <div class="sidebar-links-content">
+                                    @foreach (var link in todoInfo.Todo.Links)
+                                    {
+                                        <div class="sidebar-link-item">
+                                            <a href="@link.Url" target="_blank" rel="noopener noreferrer">@(string.IsNullOrWhiteSpace(link.Title) ? link.Url : link.Title)</a>
+                                            <button class="btn-link-delete" @onclick="() => DeleteSidebarTodoLink(todoInfo, link.Id)">×</button>
+                                        </div>
+                                    }
+                                    @if (addingLinkForSidebarTodoId == todoInfo.Todo.Id)
+                                    {
+                                        <div class="sidebar-add-link-form">
+                                            <input type="text" @bind="newSidebarTodoLinkTitle" placeholder="Link title (optional)" class="sidebar-link-input" />
+                                            <input type="text" @bind="newSidebarTodoLinkUrl" placeholder="URL" class="sidebar-link-input" @onkeydown="e => HandleSidebarTodoLinkKeyDown(e, todoInfo)" />
+                                            <div class="sidebar-link-form-actions">
+                                                <button class="btn-icon" @onclick="() => AddSidebarTodoLink(todoInfo)">✓</button>
+                                                <button class="btn-icon" @onclick="CancelAddSidebarTodoLink">✕</button>
+                                            </div>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn-add-sidebar-link" @onclick="() => StartAddSidebarTodoLink(todoInfo.Todo.Id)">+ Add Link</button>
+                                    }
+                                </div>
+                            </div>
+                            @if (!todoInfo.IsBoardLevel)
+                            {
+                                <button class="btn-show-in-board" @onclick="() => FocusCardInBoard(todoInfo)">
+                                    Show in Board
+                                </button>
+                            }
                         </div>
                     }
                 </div>
@@ -432,7 +498,7 @@
                                     {
                                         <p class="task-description" draggable="false" @ondragstart:preventDefault @ondragstart:stopPropagation>@card.Description</p>
                                     }
-                                    @if (card.Todos.Any(t => showCompleted || !t.IsCompleted))
+                                    @if (card.Todos.Any())
                                     {
                                         <div class="todo-list">
                                             <div class="todo-header">
@@ -440,33 +506,106 @@
                                             </div>
                                             @foreach (var todo in card.Todos.Where(t => showCompleted || !t.IsCompleted).OrderByDescending(t => t.IsTodaysTodo && !t.IsCompleted).ThenBy(t => t.Order))
                                             {
-                                                <div class="todo-item-wrapper @(IsCardTodoNotesExpanded(todo.Id) ? "notes-expanded" : "")">
+                                                <div class="todo-item-wrapper @(IsCardTodoExpanded(todo.Id) ? "expanded" : "")">
                                                     <div class="todo-item @(todo.IsCompleted ? "completed" : "") @(todo.IsTodaysTodo && !todo.IsCompleted ? "todays-todo" : "")">
-                                                        <input type="checkbox" checked="@todo.IsCompleted" 
-                                                               @onchange="() => ToggleTodo(lane.Id, card.Id, todo)" />
-                                                        <span class="todo-text">@todo.Text</span>
-                                                        <button class="btn-icon btn-notes-inline @(!string.IsNullOrWhiteSpace(todo.Notes) ? "has-notes" : "")" 
-                                                                @onclick="() => ToggleCardTodoNotes(todo.Id)" 
-                                                                @onclick:stopPropagation="true" 
-                                                                title="@(IsCardTodoNotesExpanded(todo.Id) ? "Hide Notes" : "Show Notes")">📝</button>
-                                                        @if (!todo.IsCompleted)
-                                                        {
-                                                            <button class="btn-icon btn-today-inline @(todo.IsTodaysTodo ? "active" : "")" 
-                                                                    @onclick="() => ToggleCardTodaysTodo(lane.Id, card.Id, todo)" 
-                                                                    @onclick:stopPropagation="true" 
-                                                                    title="@(todo.IsTodaysTodo ? "Remove from Today" : "Add to Today")">⭐</button>
-                                                        }
-                                                        <button class="btn-icon btn-todo-delete" @onclick="() => DeleteTodo(lane.Id, card.Id, todo.Id)" @onclick:stopPropagation="true">×</button>
+                                                        <div class="todo-item-main">
+                                                            <div class="todo-item-content">
+                                                                @if (editingCardTodoId == todo.Id)
+                                                                {
+                                                                    <input type="text" class="todo-edit-input" 
+                                                                           @bind="editingCardTodoText" 
+                                                                           @onkeydown="e => HandleCardTodoEditKeyDown(e, lane.Id, card.Id, todo.Id)"
+                                                                           @onclick:stopPropagation="true" />
+                                                                    <div class="todo-edit-actions">
+                                                                        <button class="btn-icon btn-save-edit" @onclick="() => SaveCardTodoEdit(lane.Id, card.Id, todo.Id)" @onclick:stopPropagation="true">✓</button>
+                                                                        <button class="btn-icon btn-cancel-edit" @onclick="CancelCardTodoEdit" @onclick:stopPropagation="true">✕</button>
+                                                                    </div>
+                                                                }
+                                                                else
+                                                                {
+                                                                    <span class="todo-text" @ondblclick="() => StartEditCardTodo(lane.Id, card.Id, todo)" @ondblclick:stopPropagation="true">@todo.Text</span>
+                                                                }
+                                                            </div>
+                                                            @if (editingCardTodoId != todo.Id)
+                                                            {
+                                                            <div class="todo-item-actions">
+                                                                <button class="btn-todo-complete @(todo.IsCompleted ? "completed" : "")" 
+                                                                        @onclick="() => ToggleTodo(lane.Id, card.Id, todo)" 
+                                                                        @onclick:stopPropagation="true" 
+                                                                        title="@(todo.IsCompleted ? "Mark as Incomplete" : "Mark as Complete")">✓</button>
+                                                                @if (!todo.IsCompleted)
+                                                                {
+                                                                    <button class="btn-todo-today @(todo.IsTodaysTodo ? "active" : "")" 
+                                                                            @onclick="() => ToggleCardTodaysTodo(lane.Id, card.Id, todo)" 
+                                                                            @onclick:stopPropagation="true"
+                                                                            title="@(todo.IsTodaysTodo ? "Remove from Today" : "Add to Today")">⭐</button>
+                                                                }
+                                                                <button class="btn-todo-expand @(IsCardTodoExpanded(todo.Id) ? "expanded" : "")" 
+                                                                        @onclick="() => ToggleCardTodoExpand(todo.Id)" 
+                                                                        @onclick:stopPropagation="true"
+                                                                        title="@(IsCardTodoExpanded(todo.Id) ? "Collapse" : "Expand")">
+                                                                    <span class="expand-chevron">▼</span>
+                                                                </button>
+                                                            </div>
+                                                            }
+                                                        </div>
                                                     </div>
-                                                    @if (IsCardTodoNotesExpanded(todo.Id))
+                                                    @if (IsCardTodoExpanded(todo.Id))
                                                     {
-                                                        <div class="todo-notes">
-                                                            <textarea class="todo-notes-textarea" 
-                                                                      placeholder="Add notes..."
-                                                                      value="@todo.Notes"
-                                                                      @oninput="e => OnCardTodoNotesInput(todo.Id, e)"
-                                                                      @onblur="() => SaveCardTodoNotes(lane.Id, card.Id, todo.Id)"
-                                                                      @onclick:stopPropagation="true"></textarea>
+                                                        <div class="todo-expanded">
+                                                            <div class="todo-notes-section">
+                                                                <div class="todo-notes-header">
+                                                                    <span class="todo-notes-icon">📝</span>
+                                                                    <span>Notes</span>
+                                                                    @if (!string.IsNullOrWhiteSpace(todo.Notes))
+                                                                    {
+                                                                        <span class="todo-notes-indicator">•</span>
+                                                                    }
+                                                                </div>
+                                                                <textarea class="todo-notes-textarea" 
+                                                                          placeholder="Add notes..."
+                                                                          value="@todo.Notes"
+                                                                          @oninput="e => OnCardTodoNotesInput(todo.Id, e)"
+                                                                          @onblur="() => SaveCardTodoNotes(lane.Id, card.Id, todo.Id)"
+                                                                          @onclick:stopPropagation="true"></textarea>
+                                                            </div>
+                                                            <div class="todo-links-section" @onclick:stopPropagation="true">
+                                                                <div class="todo-links-header">
+                                                                    <span class="todo-links-icon">🔗</span>
+                                                                    <span>Links</span>
+                                                                    @if (todo.Links.Any())
+                                                                    {
+                                                                        <span class="todo-links-count">(@todo.Links.Count)</span>
+                                                                    }
+                                                                </div>
+                                                                <div class="todo-links-content">
+                                                                    @foreach (var link in todo.Links)
+                                                                    {
+                                                                        <div class="todo-link-item">
+                                                                            <a href="@link.Url" target="_blank" rel="noopener noreferrer">@(string.IsNullOrWhiteSpace(link.Title) ? link.Url : link.Title)</a>
+                                                                            <button class="btn-link-delete" @onclick="() => DeleteCardTodoLink(lane.Id, card.Id, todo.Id, link.Id)">×</button>
+                                                                        </div>
+                                                                    }
+                                                                    @if (addingLinkForCardTodoId == todo.Id)
+                                                                    {
+                                                                        <div class="todo-add-link-form">
+                                                                            <input type="text" @bind="newCardTodoLinkTitle" placeholder="Link title (optional)" class="todo-link-input" />
+                                                                            <input type="text" @bind="newCardTodoLinkUrl" placeholder="URL" class="todo-link-input" @onkeydown="e => HandleCardTodoLinkKeyDown(e, lane.Id, card.Id, todo.Id)" />
+                                                                            <div class="todo-link-form-actions">
+                                                                                <button class="btn-icon" @onclick="() => AddCardTodoLink(lane.Id, card.Id, todo.Id)">✓</button>
+                                                                                <button class="btn-icon" @onclick="CancelAddCardTodoLink">✕</button>
+                                                                            </div>
+                                                                        </div>
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        <button class="btn-add-todo-link" @onclick="() => StartAddCardTodoLink(todo.Id)">+ Add Link</button>
+                                                                    }
+                                                                </div>
+                                                            </div>
+                                                            <button class="btn-todo-delete-expanded" @onclick="() => DeleteTodo(lane.Id, card.Id, todo.Id)" @onclick:stopPropagation="true">
+                                                                🗑 Delete
+                                                            </button>
                                                         </div>
                                                     }
                                                 </div>
@@ -544,6 +683,46 @@
                                                 else
                                                 {
                                                     <button class="btn-add-link" @onclick="() => StartAddLink(card.Id)" @onclick:stopPropagation="true">+ Add Link</button>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                    @* Contacts Section *@
+                                    <div class="card-contacts-section">
+                                        <div class="contacts-header" @onclick="() => ToggleContactsExpand(card.Id)" @onclick:stopPropagation="true">
+                                            <span class="contacts-icon">👤</span>
+                                            <span>Contacts</span>
+                                            @if (card.Contacts.Any())
+                                            {
+                                                <span class="contacts-count">(@card.Contacts.Count)</span>
+                                            }
+                                            <span class="expand-icon @(IsContactsExpanded(card.Id) ? "expanded" : "")">▶</span>
+                                        </div>
+                                        @if (IsContactsExpanded(card.Id))
+                                        {
+                                            <div class="contacts-content">
+                                                @foreach (var contact in card.Contacts)
+                                                {
+                                                    <div class="contact-item">
+                                                        <a href="mailto:@contact.Email" @onclick:stopPropagation="true">@contact.Name</a>
+                                                        <span class="contact-email">@contact.Email</span>
+                                                        <button class="btn-icon btn-contact-delete" @onclick="() => DeleteContact(lane.Id, card.Id, contact.Id)" @onclick:stopPropagation="true">×</button>
+                                                    </div>
+                                                }
+                                                @if (addingContactForCardId == card.Id)
+                                                {
+                                                    <div class="add-contact-form">
+                                                        <input type="text" @bind="newContactName" placeholder="Name" class="contact-input" @onclick:stopPropagation="true" />
+                                                        <input type="email" @bind="newContactEmail" placeholder="Email" class="contact-input" @onkeydown="e => HandleContactKeyDown(e, lane.Id, card.Id)" @onclick:stopPropagation="true" />
+                                                        <div class="contact-form-actions">
+                                                            <button class="btn-icon" @onclick="() => AddContact(lane.Id, card.Id)" @onclick:stopPropagation="true">✓</button>
+                                                            <button class="btn-icon" @onclick="CancelAddContact" @onclick:stopPropagation="true">✕</button>
+                                                        </div>
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    <button class="btn-add-contact" @onclick="() => StartAddContact(card.Id)" @onclick:stopPropagation="true">+ Add Contact</button>
                                                 }
                                             </div>
                                         }
@@ -733,12 +912,6 @@
         transition: background-color 0.15s;
     }
 
-    .sidebar-todo-main {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-    }
-
     .sidebar-todo-item:hover {
         background: var(--bg-hover);
     }
@@ -752,33 +925,122 @@
         color: var(--text-muted);
     }
 
-    .sidebar-todo-item input[type="checkbox"] {
-        width: 16px;
-        height: 16px;
-        margin-top: 2px;
-        cursor: pointer;
-        accent-color: var(--accent-primary);
+    .sidebar-todo-main {
+        display: flex;
+        gap: 8px;
+        width: 100%;
+    }
+
+    .sidebar-todo-actions-col {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        align-items: center;
         flex-shrink: 0;
     }
 
     .sidebar-todo-content {
         flex: 1;
         min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
     }
 
     .sidebar-todo-text {
-        display: block;
         font-size: 13px;
         color: var(--text-primary);
         word-break: break-word;
         line-height: 1.4;
+        cursor: text;
+    }
+
+    .sidebar-todo-edit-input {
+        flex: 1;
+        padding: 4px 8px;
+        font-size: 13px;
+        border: 1px solid var(--accent-primary);
+        border-radius: 4px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .sidebar-todo-edit-input:focus {
+        outline: none;
+    }
+
+    .sidebar-todo-edit-actions {
+        display: flex;
+        gap: 4px;
+    }
+
+    .btn-sidebar-complete {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+        padding: 0;
+        width: 20px;
+        height: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 3px;
+        color: var(--text-muted);
+        opacity: 0.4;
+        transition: all 0.2s;
+    }
+
+    .btn-sidebar-complete:hover {
+        opacity: 0.8;
+        color: var(--btn-complete-color);
+    }
+
+    .btn-sidebar-complete.completed {
+        opacity: 1;
+        color: var(--btn-complete-color);
+    }
+
+    .btn-sidebar-today {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 12px;
+        padding: 0;
+        width: 20px;
+        height: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 3px;
+        opacity: 0.3;
+        transition: all 0.2s;
+    }
+
+    .btn-sidebar-today:hover {
+        opacity: 0.8;
+    }
+
+    .btn-sidebar-today.active {
+        opacity: 1;
+    }
+
+    .sidebar-todo-footer {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-top: 4px;
+    }
+
+    .sidebar-todo-context-wrapper {
+        flex: 1;
+        min-width: 0;
     }
 
     .sidebar-todo-context {
         display: block;
         font-size: 11px;
         color: var(--text-muted);
-        margin-top: 4px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -787,6 +1049,58 @@
     .sidebar-todo-context.board-context {
         color: var(--accent-primary);
         font-weight: 500;
+    }
+
+    .btn-sidebar-expand {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 10px;
+        padding: 2px 4px;
+        border-radius: 3px;
+        color: var(--text-muted);
+        opacity: 0.5;
+        transition: all 0.2s;
+        width: 20px;
+        height: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .btn-sidebar-expand:hover {
+        opacity: 1;
+        background: var(--bg-hover);
+    }
+
+    .btn-sidebar-expand .expand-chevron {
+        display: inline-block;
+        transition: transform 0.2s;
+    }
+
+    .btn-sidebar-expand.expanded .expand-chevron {
+        transform: rotate(180deg);
+    }
+
+    .btn-show-in-board {
+        display: block;
+        width: 100%;
+        padding: 6px 10px;
+        margin-top: 8px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        color: var(--text-secondary);
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-align: center;
+    }
+
+    .btn-show-in-board:hover {
+        background: var(--accent-primary);
+        color: white;
+        border-color: var(--accent-primary);
     }
 
     .sidebar-todo-item.board-level {
@@ -805,37 +1119,44 @@
         border-bottom: 2px solid var(--btn-reactivate-color);
     }
 
-    .btn-notes-toggle {
-        background: none;
-        border: none;
-        cursor: pointer;
-        font-size: 12px;
-        padding: 2px 4px;
-        border-radius: 4px;
-        opacity: 0.3;
-        transition: opacity 0.2s;
-        flex-shrink: 0;
-    }
-
-    .btn-notes-toggle:hover {
-        opacity: 0.8;
-    }
-
-    .btn-notes-toggle.has-notes {
-        opacity: 0.8;
-    }
-
-    .sidebar-todo-notes {
+    .sidebar-todo-expanded {
         margin-top: 8px;
-        padding-left: 24px;
+        padding-top: 8px;
+        border-top: 1px solid var(--border-light);
+    }
+
+    .sidebar-notes-section {
+        margin-bottom: 8px;
+        border: 1px solid var(--border-light);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .sidebar-notes-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 8px;
+        background: var(--bg-tertiary);
+        font-size: 12px;
+        color: var(--text-secondary);
+    }
+
+    .sidebar-notes-icon {
+        font-size: 11px;
+    }
+
+    .sidebar-notes-indicator {
+        color: var(--accent-primary);
+        font-weight: bold;
     }
 
     .sidebar-notes-textarea {
         width: 100%;
         min-height: 50px;
-        padding: 6px 8px;
-        border: 1px solid var(--border-color);
-        border-radius: 4px;
+        padding: 8px;
+        border: none;
+        border-top: 1px solid var(--border-light);
         background: var(--bg-card);
         color: var(--text-primary);
         font-size: 12px;
@@ -846,31 +1167,43 @@
 
     .sidebar-notes-textarea:focus {
         outline: none;
-        border-color: var(--accent-primary);
+        background: var(--bg-tertiary);
     }
 
     .sidebar-notes-textarea::placeholder {
         color: var(--text-muted);
     }
 
-    .btn-today-toggle {
-        background: none;
-        border: none;
-        cursor: pointer;
-        font-size: 14px;
-        padding: 2px 4px;
+    .sidebar-links-section {
+        margin-bottom: 8px;
+        border: 1px solid var(--border-light);
         border-radius: 4px;
-        opacity: 0.3;
-        transition: opacity 0.2s;
-        flex-shrink: 0;
+        overflow: hidden;
     }
 
-    .btn-today-toggle:hover {
-        opacity: 0.8;
+    .sidebar-links-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 8px;
+        background: var(--bg-tertiary);
+        font-size: 12px;
+        color: var(--text-secondary);
     }
 
-    .btn-today-toggle.active {
-        opacity: 1;
+    .sidebar-links-icon {
+        font-size: 11px;
+    }
+
+    .sidebar-links-count {
+        color: var(--text-muted);
+        font-size: 11px;
+    }
+
+    .sidebar-links-content {
+        padding: 8px;
+        border-top: 1px solid var(--border-light);
+        background: var(--bg-card);
     }
 
     .todo-input-row {
@@ -1818,14 +2151,22 @@
     }
 
     .todo-item-wrapper {
-        margin-bottom: 2px;
+        margin-bottom: 4px;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-card);
+        border-radius: 4px;
+    }
+
+    .todo-item-wrapper.expanded {
+        background: var(--bg-tertiary);
     }
 
     .todo-item {
         display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 0;
+        flex-direction: column;
+        gap: 0;
+        padding: 6px;
         font-size: 12px;
         color: var(--text-secondary);
     }
@@ -1837,51 +2178,203 @@
 
     .todo-item.todays-todo {
         border: 1px solid var(--btn-reactivate-color);
-        border-radius: 4px;
-        padding: 4px 6px;
         background: rgba(210, 153, 34, 0.08);
+        border-radius: 4px;
     }
 
-    .btn-notes-inline {
-        opacity: 0.3;
-        font-size: 10px;
-        padding: 0 2px;
-        transition: opacity 0.2s;
+    .todo-item-main {
+        display: flex;
+        gap: 8px;
+        width: 100%;
     }
 
-    .todo-item:hover .btn-notes-inline {
-        opacity: 0.6;
-    }
-
-    .btn-notes-inline.has-notes {
-        opacity: 0.8;
-    }
-
-    .btn-today-inline {
-        opacity: 0.3;
-        font-size: 11px;
-        padding: 0 2px;
-        transition: opacity 0.2s;
-    }
-
-    .todo-item:hover .btn-today-inline {
-        opacity: 0.6;
-    }
-
-    .btn-today-inline.active {
-        opacity: 1;
-    }
-
-    .todo-item input[type="checkbox"] {
-        width: 14px;
-        height: 14px;
-        cursor: pointer;
-        accent-color: var(--accent-primary);
+    .todo-item-content {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
     }
 
     .todo-text {
         flex: 1;
         word-break: break-word;
+        line-height: 1.4;
+        cursor: text;
+    }
+
+    .todo-edit-actions {
+        display: flex;
+        gap: 4px;
+    }
+
+    .todo-item-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        align-items: center;
+        flex-shrink: 0;
+    }
+
+    .btn-todo-today {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 10px;
+        padding: 0;
+        width: 16px;
+        height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 3px;
+        opacity: 0.3;
+        transition: all 0.2s;
+    }
+
+    .btn-todo-today:hover {
+        opacity: 0.8;
+    }
+
+    .btn-todo-today.active {
+        opacity: 1;
+    }
+
+    .btn-todo-expand {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 8px;
+        padding: 2px;
+        border-radius: 3px;
+        color: var(--text-muted);
+        opacity: 0.5;
+        transition: all 0.2s;
+        width: 16px;
+        height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .btn-todo-expand:hover {
+        opacity: 1;
+        background: var(--bg-hover);
+    }
+
+    .btn-todo-expand .expand-chevron {
+        display: inline-block;
+        transition: transform 0.2s;
+    }
+
+    .btn-todo-expand.expanded .expand-chevron {
+        transform: rotate(180deg);
+    }
+
+    .todo-expanded {
+        margin-top: 6px;
+        padding: 8px;
+        border-top: 1px solid var(--border-light);
+    }
+
+    .todo-notes-section {
+        margin-bottom: 8px;
+        border: 1px solid var(--border-light);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .todo-notes-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 6px;
+        background: var(--bg-card);
+        font-size: 11px;
+        color: var(--text-secondary);
+    }
+
+    .todo-notes-icon {
+        font-size: 10px;
+    }
+
+    .todo-notes-indicator {
+        color: var(--accent-primary);
+        font-weight: bold;
+    }
+
+    .todo-links-section {
+        margin-bottom: 8px;
+        border: 1px solid var(--border-light);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .todo-links-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 6px;
+        background: var(--bg-card);
+        font-size: 11px;
+        color: var(--text-secondary);
+    }
+
+    .todo-links-icon {
+        font-size: 10px;
+    }
+
+    .todo-links-count {
+        color: var(--text-muted);
+        font-size: 10px;
+    }
+
+    .todo-links-content {
+        padding: 6px;
+        border-top: 1px solid var(--border-light);
+        background: var(--bg-secondary);
+    }
+
+    .btn-todo-delete-expanded {
+        display: block;
+        width: 100%;
+        padding: 4px 8px;
+        margin-top: 4px;
+        background: transparent;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        color: var(--text-muted);
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-align: center;
+    }
+
+    .btn-todo-delete-expanded:hover {
+        background: var(--btn-delete-hover);
+        border-color: var(--validation-error);
+        color: var(--validation-error);
+    }
+
+    .todo-item-footer {
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .todo-actions-select {
+        padding: 3px 6px;
+        font-size: 11px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        cursor: pointer;
+        min-width: 80px;
+    }
+
+    .todo-actions-select:focus {
+        outline: none;
+        border-color: var(--accent-primary);
     }
 
     .btn-todo-delete {
@@ -1899,17 +2392,87 @@
         color: var(--validation-error);
     }
 
-    .todo-notes {
-        padding: 4px 0 4px 20px;
+    .btn-todo-complete {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 12px;
+        padding: 0;
+        width: 16px;
+        height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 3px;
+        color: var(--text-muted);
+        opacity: 0.4;
+        transition: all 0.2s;
+        flex-shrink: 0;
+    }
+
+    .todo-item:hover .btn-todo-complete {
+        opacity: 0.6;
+    }
+
+    .btn-todo-complete:hover {
+        opacity: 1;
+        color: var(--btn-complete-color);
+    }
+
+    .btn-todo-complete.completed {
+        opacity: 1;
+        color: var(--btn-complete-color);
+    }
+
+    /* Todo edit styles */
+    .todo-edit-input {
+        flex: 1;
+        padding: 4px 8px;
+        font-size: 12px;
+        border: 1px solid var(--accent-primary);
+        border-radius: 4px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .todo-edit-input:focus {
+        outline: none;
+    }
+
+    .btn-save-edit, .btn-cancel-edit {
+        padding: 2px 6px;
+        font-size: 12px;
+    }
+
+    .btn-save-edit {
+        color: var(--btn-complete-color);
+    }
+
+    .btn-cancel-edit {
+        color: var(--text-muted);
+    }
+
+    .sidebar-todo-edit-input {
+        flex: 1;
+        padding: 4px 8px;
+        font-size: 13px;
+        border: 1px solid var(--accent-primary);
+        border-radius: 4px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .sidebar-todo-edit-input:focus {
+        outline: none;
     }
 
     .todo-notes-textarea {
         width: 100%;
         min-height: 40px;
         padding: 6px 8px;
-        border: 1px solid var(--border-color);
-        border-radius: 4px;
-        background: var(--bg-card);
+        border: none;
+        border-top: 1px solid var(--border-light);
+        background: var(--bg-secondary);
         color: var(--text-primary);
         font-size: 11px;
         font-family: inherit;
@@ -1919,11 +2482,178 @@
 
     .todo-notes-textarea:focus {
         outline: none;
-        border-color: var(--accent-primary);
+        background: var(--bg-tertiary);
     }
 
     .todo-notes-textarea::placeholder {
         color: var(--text-muted);
+    }
+
+    /* Todo links styles */
+    .todo-links {
+        padding: 6px;
+        background: var(--bg-tertiary);
+        border-radius: 4px;
+        margin-top: 4px;
+    }
+
+    .todo-link-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 0;
+        font-size: 12px;
+    }
+
+    .todo-link-item a {
+        color: var(--accent-primary);
+        text-decoration: none;
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .todo-link-item a:hover {
+        text-decoration: underline;
+    }
+
+    .todo-add-link-form {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-top: 6px;
+        padding-top: 6px;
+        border-top: 1px solid var(--border-light);
+    }
+
+    .todo-link-input {
+        padding: 4px 8px;
+        font-size: 11px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg-card);
+        color: var(--text-primary);
+    }
+
+    .todo-link-input:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+    }
+
+    .todo-link-form-actions {
+        display: flex;
+        gap: 4px;
+        justify-content: flex-end;
+    }
+
+    .btn-add-todo-link {
+        font-size: 11px;
+        padding: 4px 8px;
+        margin-top: 4px;
+        background: transparent;
+        border: 1px dashed var(--border-color);
+        border-radius: 4px;
+        color: var(--text-muted);
+        cursor: pointer;
+    }
+
+    .btn-add-todo-link:hover {
+        background: var(--bg-hover);
+        color: var(--text-secondary);
+    }
+
+    /* Sidebar todo links styles */
+    .sidebar-todo-links {
+        padding: 6px;
+        background: var(--bg-card);
+        border-radius: 4px;
+        margin-top: 6px;
+    }
+
+    .sidebar-link-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 0;
+        font-size: 12px;
+    }
+
+    .sidebar-link-item a {
+        color: var(--accent-primary);
+        text-decoration: none;
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .sidebar-link-item a:hover {
+        text-decoration: underline;
+    }
+
+    .sidebar-link-item .btn-link-delete {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+        padding: 0 4px;
+        color: var(--text-muted);
+        opacity: 0;
+        transition: opacity 0.2s;
+    }
+
+    .sidebar-link-item:hover .btn-link-delete {
+        opacity: 1;
+    }
+
+    .sidebar-link-item .btn-link-delete:hover {
+        color: var(--validation-error);
+    }
+
+    .sidebar-add-link-form {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-top: 6px;
+        padding-top: 6px;
+        border-top: 1px solid var(--border-light);
+    }
+
+    .sidebar-link-input {
+        padding: 4px 8px;
+        font-size: 11px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .sidebar-link-input:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+    }
+
+    .sidebar-link-form-actions {
+        display: flex;
+        gap: 4px;
+        justify-content: flex-end;
+    }
+
+    .btn-add-sidebar-link {
+        font-size: 11px;
+        padding: 4px 8px;
+        margin-top: 4px;
+        background: transparent;
+        border: 1px dashed var(--border-color);
+        border-radius: 4px;
+        color: var(--text-muted);
+        cursor: pointer;
+    }
+
+    .btn-add-sidebar-link:hover {
+        background: var(--bg-hover);
+        color: var(--text-secondary);
     }
 
     .add-todo-inline {
@@ -2145,6 +2875,132 @@
         color: var(--text-secondary);
     }
 
+    /* Contacts Section */
+    .card-contacts-section {
+        margin: 8px 0;
+        border: 1px solid var(--border-light);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .contacts-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 8px;
+        background: var(--bg-tertiary);
+        cursor: pointer;
+        font-size: 12px;
+        color: var(--text-secondary);
+        transition: background-color 0.15s;
+    }
+
+    .contacts-header:hover {
+        background: var(--bg-hover);
+    }
+
+    .contacts-icon {
+        font-size: 11px;
+    }
+
+    .contacts-count {
+        color: var(--text-muted);
+        font-size: 11px;
+    }
+
+    .contacts-content {
+        padding: 8px;
+        border-top: 1px solid var(--border-light);
+        background: var(--bg-card);
+    }
+
+    .contact-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 0;
+        font-size: 12px;
+    }
+
+    .contact-item a {
+        color: var(--accent-primary);
+        text-decoration: none;
+        font-weight: 500;
+    }
+
+    .contact-item a:hover {
+        text-decoration: underline;
+    }
+
+    .contact-email {
+        color: var(--text-muted);
+        font-size: 11px;
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .btn-contact-delete {
+        opacity: 0;
+        font-size: 14px;
+        padding: 0 4px;
+        color: var(--text-muted);
+    }
+
+    .contact-item:hover .btn-contact-delete {
+        opacity: 1;
+    }
+
+    .btn-contact-delete:hover {
+        color: var(--validation-error);
+    }
+
+    .add-contact-form {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--border-light);
+    }
+
+    .contact-input {
+        padding: 6px 8px;
+        font-size: 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .contact-input:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+    }
+
+    .contact-form-actions {
+        display: flex;
+        gap: 4px;
+        justify-content: flex-end;
+    }
+
+    .btn-add-contact {
+        font-size: 11px;
+        padding: 4px 8px;
+        margin-top: 4px;
+        background: transparent;
+        border: 1px dashed var(--border-color);
+        border-radius: 4px;
+        color: var(--text-muted);
+        cursor: pointer;
+    }
+
+    .btn-add-contact:hover {
+        background: var(--bg-hover);
+        color: var(--text-secondary);
+    }
+
     .task-meta {
         display: flex;
         flex-direction: column;
@@ -2329,16 +3185,49 @@
     private HashSet<Guid> expandedNotesCardIds = new();
     private Dictionary<Guid, string> notesTextCache = new();
 
+    // Sidebar todo expansion (combined notes/links)
+    private HashSet<Guid> expandedSidebarTodoIds = new();
+
+    // Card todo expansion (combined notes/links)
+    private HashSet<Guid> expandedCardTodoIds = new();
+
     // Todo notes expansion (for sidebar and card todos)
     private HashSet<Guid> expandedSidebarTodoNotesIds = new();
     private HashSet<Guid> expandedCardTodoNotesIds = new();
     private Dictionary<Guid, string> todoNotesTextCache = new();
+
+    // Todo links expansion (for sidebar and card todos)
+    private HashSet<Guid> expandedSidebarTodoLinksIds = new();
+    private HashSet<Guid> expandedCardTodoLinksIds = new();
+
+    // Sidebar todo link adding
+    private Guid? addingLinkForSidebarTodoId;
+    private string newSidebarTodoLinkTitle = "";
+    private string newSidebarTodoLinkUrl = "";
+
+    // Card todo link adding
+    private Guid? addingLinkForCardTodoId;
+    private string newCardTodoLinkTitle = "";
+    private string newCardTodoLinkUrl = "";
+
+    // Todo editing
+    private Guid? editingCardTodoId;
+    private string editingCardTodoText = "";
+    private Guid? editingSidebarTodoId;
+    private string editingSidebarTodoText = "";
+    private TodoInfo? editingSidebarTodoInfo;
 
     // Links expansion and adding
     private HashSet<Guid> expandedLinksCardIds = new();
     private Guid? addingLinkForCardId;
     private string newLinkTitle = "";
     private string newLinkUrl = "";
+
+    // Contacts expansion and adding
+    private HashSet<Guid> expandedContactsCardIds = new();
+    private Guid? addingContactForCardId;
+    private string newContactName = "";
+    private string newContactEmail = "";
 
     protected override async Task OnInitializedAsync()
     {
@@ -2962,6 +3851,135 @@
         }
     }
 
+    // Card todo action dropdown handler
+    private async Task HandleCardTodoAction(ChangeEventArgs e, Guid laneId, Guid cardId, TodoItem todo)
+    {
+        var action = e.Value?.ToString();
+        switch (action)
+        {
+            case "edit":
+                StartEditCardTodo(laneId, cardId, todo);
+                break;
+            case "today":
+                await ToggleCardTodaysTodo(laneId, cardId, todo);
+                break;
+            case "notes":
+                ToggleCardTodoNotes(todo.Id);
+                break;
+            case "links":
+                ToggleCardTodoLinks(todo.Id);
+                break;
+            case "delete":
+                await DeleteTodo(laneId, cardId, todo.Id);
+                break;
+        }
+        StateHasChanged();
+    }
+
+    // Sidebar todo action dropdown handler
+    private async Task HandleSidebarTodoAction(ChangeEventArgs e, TodoInfo todoInfo)
+    {
+        var action = e.Value?.ToString();
+        switch (action)
+        {
+            case "edit":
+                StartEditSidebarTodo(todoInfo);
+                break;
+            case "today":
+                await ToggleTodaysTodo(todoInfo);
+                break;
+            case "notes":
+                ToggleSidebarTodoNotes(todoInfo.Todo.Id);
+                break;
+            case "links":
+                ToggleSidebarTodoLinks(todoInfo.Todo.Id);
+                break;
+            case "focus":
+                await FocusCardInBoard(todoInfo);
+                break;
+        }
+        StateHasChanged();
+    }
+
+    // Card todo edit methods
+    private void StartEditCardTodo(Guid laneId, Guid cardId, TodoItem todo)
+    {
+        editingCardTodoId = todo.Id;
+        editingCardTodoText = todo.Text;
+    }
+
+    private void CancelCardTodoEdit()
+    {
+        editingCardTodoId = null;
+        editingCardTodoText = "";
+    }
+
+    private async Task HandleCardTodoEditKeyDown(KeyboardEventArgs e, Guid laneId, Guid cardId, Guid todoId)
+    {
+        if (e.Key == "Enter")
+        {
+            await SaveCardTodoEdit(laneId, cardId, todoId);
+        }
+        else if (e.Key == "Escape")
+        {
+            CancelCardTodoEdit();
+        }
+    }
+
+    private async Task SaveCardTodoEdit(Guid laneId, Guid cardId, Guid todoId)
+    {
+        if (!string.IsNullOrWhiteSpace(editingCardTodoText) && board != null)
+        {
+            await BoardService.UpdateTodoTextAsync(board.Id, laneId, cardId, todoId, editingCardTodoText.Trim());
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+        CancelCardTodoEdit();
+    }
+
+    // Sidebar todo edit methods
+    private void StartEditSidebarTodo(TodoInfo todoInfo)
+    {
+        editingSidebarTodoId = todoInfo.Todo.Id;
+        editingSidebarTodoText = todoInfo.Todo.Text;
+        editingSidebarTodoInfo = todoInfo;
+    }
+
+    private void CancelSidebarTodoEdit()
+    {
+        editingSidebarTodoId = null;
+        editingSidebarTodoText = "";
+        editingSidebarTodoInfo = null;
+    }
+
+    private async Task HandleSidebarTodoEditKeyDown(KeyboardEventArgs e, TodoInfo todoInfo)
+    {
+        if (e.Key == "Enter")
+        {
+            await SaveSidebarTodoEdit(todoInfo);
+        }
+        else if (e.Key == "Escape")
+        {
+            CancelSidebarTodoEdit();
+        }
+    }
+
+    private async Task SaveSidebarTodoEdit(TodoInfo todoInfo)
+    {
+        if (!string.IsNullOrWhiteSpace(editingSidebarTodoText) && board != null)
+        {
+            if (todoInfo.IsBoardLevel)
+            {
+                await BoardService.UpdateBoardTodoTextAsync(board.Id, todoInfo.Todo.Id, editingSidebarTodoText.Trim());
+            }
+            else
+            {
+                await BoardService.UpdateTodoTextAsync(board.Id, todoInfo.LaneId, todoInfo.CardId, todoInfo.Todo.Id, editingSidebarTodoText.Trim());
+            }
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+        CancelSidebarTodoEdit();
+    }
+
     // Focus card from sidebar
     private async Task FocusCardInBoard(TodoInfo todoInfo)
     {
@@ -3031,6 +4049,31 @@
         }
     }
 
+    // Sidebar todo expand methods (combined notes/links)
+    private bool IsSidebarTodoExpanded(Guid todoId) => expandedSidebarTodoIds.Contains(todoId);
+
+    private void ToggleSidebarTodoExpand(Guid todoId)
+    {
+        if (expandedSidebarTodoIds.Contains(todoId))
+        {
+            expandedSidebarTodoIds.Remove(todoId);
+            if (addingLinkForSidebarTodoId == todoId)
+            {
+                CancelAddSidebarTodoLink();
+            }
+        }
+        else
+        {
+            expandedSidebarTodoIds.Add(todoId);
+            // Initialize cache with current notes
+            var todo = GetAllTodos().FirstOrDefault(t => t.Id == todoId);
+            if (todo != null)
+            {
+                todoNotesTextCache[todoId] = todo.Notes;
+            }
+        }
+    }
+
     // Sidebar todo notes methods
     private bool IsSidebarTodoNotesExpanded(Guid todoId) => expandedSidebarTodoNotesIds.Contains(todoId);
 
@@ -3073,6 +4116,31 @@
         }
     }
 
+    // Card todo expand methods (combined notes/links)
+    private bool IsCardTodoExpanded(Guid todoId) => expandedCardTodoIds.Contains(todoId);
+
+    private void ToggleCardTodoExpand(Guid todoId)
+    {
+        if (expandedCardTodoIds.Contains(todoId))
+        {
+            expandedCardTodoIds.Remove(todoId);
+            if (addingLinkForCardTodoId == todoId)
+            {
+                CancelAddCardTodoLink();
+            }
+        }
+        else
+        {
+            expandedCardTodoIds.Add(todoId);
+            // Initialize cache with current notes
+            var todo = GetAllTodos().FirstOrDefault(t => t.Id == todoId);
+            if (todo != null)
+            {
+                todoNotesTextCache[todoId] = todo.Notes;
+            }
+        }
+    }
+
     // Card todo notes methods
     private bool IsCardTodoNotesExpanded(Guid todoId) => expandedCardTodoNotesIds.Contains(todoId);
 
@@ -3104,6 +4172,148 @@
         if (board != null && todoNotesTextCache.TryGetValue(todoId, out var notes))
         {
             await BoardService.UpdateTodoNotesAsync(board.Id, laneId, cardId, todoId, notes);
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    // Card todo links methods
+    private bool IsCardTodoLinksExpanded(Guid todoId) => expandedCardTodoLinksIds.Contains(todoId);
+
+    private void ToggleCardTodoLinks(Guid todoId)
+    {
+        if (expandedCardTodoLinksIds.Contains(todoId))
+        {
+            expandedCardTodoLinksIds.Remove(todoId);
+            if (addingLinkForCardTodoId == todoId)
+            {
+                CancelAddCardTodoLink();
+            }
+        }
+        else
+        {
+            expandedCardTodoLinksIds.Add(todoId);
+        }
+    }
+
+    private void StartAddCardTodoLink(Guid todoId)
+    {
+        addingLinkForCardTodoId = todoId;
+        newCardTodoLinkTitle = "";
+        newCardTodoLinkUrl = "";
+    }
+
+    private void CancelAddCardTodoLink()
+    {
+        addingLinkForCardTodoId = null;
+        newCardTodoLinkTitle = "";
+        newCardTodoLinkUrl = "";
+    }
+
+    private async Task HandleCardTodoLinkKeyDown(KeyboardEventArgs e, Guid laneId, Guid cardId, Guid todoId)
+    {
+        if (e.Key == "Enter")
+        {
+            await AddCardTodoLink(laneId, cardId, todoId);
+        }
+        else if (e.Key == "Escape")
+        {
+            CancelAddCardTodoLink();
+        }
+    }
+
+    private async Task AddCardTodoLink(Guid laneId, Guid cardId, Guid todoId)
+    {
+        if (!string.IsNullOrWhiteSpace(newCardTodoLinkUrl) && board != null)
+        {
+            await BoardService.AddTodoLinkAsync(board.Id, laneId, cardId, todoId, newCardTodoLinkTitle.Trim(), newCardTodoLinkUrl.Trim());
+            board = await BoardService.GetBoardAsync(board.Id);
+            CancelAddCardTodoLink();
+        }
+    }
+
+    private async Task DeleteCardTodoLink(Guid laneId, Guid cardId, Guid todoId, Guid linkId)
+    {
+        if (board != null)
+        {
+            await BoardService.DeleteTodoLinkAsync(board.Id, laneId, cardId, todoId, linkId);
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    // Sidebar todo links methods
+    private bool IsSidebarTodoLinksExpanded(Guid todoId) => expandedSidebarTodoLinksIds.Contains(todoId);
+
+    private void ToggleSidebarTodoLinks(Guid todoId)
+    {
+        if (expandedSidebarTodoLinksIds.Contains(todoId))
+        {
+            expandedSidebarTodoLinksIds.Remove(todoId);
+            if (addingLinkForSidebarTodoId == todoId)
+            {
+                CancelAddSidebarTodoLink();
+            }
+        }
+        else
+        {
+            expandedSidebarTodoLinksIds.Add(todoId);
+        }
+    }
+
+    private void StartAddSidebarTodoLink(Guid todoId)
+    {
+        addingLinkForSidebarTodoId = todoId;
+        newSidebarTodoLinkTitle = "";
+        newSidebarTodoLinkUrl = "";
+    }
+
+    private void CancelAddSidebarTodoLink()
+    {
+        addingLinkForSidebarTodoId = null;
+        newSidebarTodoLinkTitle = "";
+        newSidebarTodoLinkUrl = "";
+    }
+
+    private async Task HandleSidebarTodoLinkKeyDown(KeyboardEventArgs e, TodoInfo todoInfo)
+    {
+        if (e.Key == "Enter")
+        {
+            await AddSidebarTodoLink(todoInfo);
+        }
+        else if (e.Key == "Escape")
+        {
+            CancelAddSidebarTodoLink();
+        }
+    }
+
+    private async Task AddSidebarTodoLink(TodoInfo todoInfo)
+    {
+        if (!string.IsNullOrWhiteSpace(newSidebarTodoLinkUrl) && board != null)
+        {
+            if (todoInfo.IsBoardLevel)
+            {
+                await BoardService.AddBoardTodoLinkAsync(board.Id, todoInfo.Todo.Id, newSidebarTodoLinkTitle.Trim(), newSidebarTodoLinkUrl.Trim());
+            }
+            else
+            {
+                await BoardService.AddTodoLinkAsync(board.Id, todoInfo.LaneId, todoInfo.CardId, todoInfo.Todo.Id, newSidebarTodoLinkTitle.Trim(), newSidebarTodoLinkUrl.Trim());
+            }
+            board = await BoardService.GetBoardAsync(board.Id);
+            CancelAddSidebarTodoLink();
+        }
+    }
+
+    private async Task DeleteSidebarTodoLink(TodoInfo todoInfo, Guid linkId)
+    {
+        if (board != null)
+        {
+            if (todoInfo.IsBoardLevel)
+            {
+                await BoardService.DeleteBoardTodoLinkAsync(board.Id, todoInfo.Todo.Id, linkId);
+            }
+            else
+            {
+                await BoardService.DeleteTodoLinkAsync(board.Id, todoInfo.LaneId, todoInfo.CardId, todoInfo.Todo.Id, linkId);
+            }
             board = await BoardService.GetBoardAsync(board.Id);
         }
     }
@@ -3178,6 +4388,70 @@
         if (board != null)
         {
             await BoardService.DeleteCardLinkAsync(board.Id, laneId, cardId, linkId);
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    // Contacts methods
+    private bool IsContactsExpanded(Guid cardId) => expandedContactsCardIds.Contains(cardId);
+
+    private void ToggleContactsExpand(Guid cardId)
+    {
+        if (expandedContactsCardIds.Contains(cardId))
+        {
+            expandedContactsCardIds.Remove(cardId);
+            if (addingContactForCardId == cardId)
+            {
+                CancelAddContact();
+            }
+        }
+        else
+        {
+            expandedContactsCardIds.Add(cardId);
+        }
+    }
+
+    private void StartAddContact(Guid cardId)
+    {
+        addingContactForCardId = cardId;
+        newContactName = "";
+        newContactEmail = "";
+    }
+
+    private void CancelAddContact()
+    {
+        addingContactForCardId = null;
+        newContactName = "";
+        newContactEmail = "";
+    }
+
+    private async Task HandleContactKeyDown(KeyboardEventArgs e, Guid laneId, Guid cardId)
+    {
+        if (e.Key == "Enter")
+        {
+            await AddContact(laneId, cardId);
+        }
+        else if (e.Key == "Escape")
+        {
+            CancelAddContact();
+        }
+    }
+
+    private async Task AddContact(Guid laneId, Guid cardId)
+    {
+        if (!string.IsNullOrWhiteSpace(newContactName) && !string.IsNullOrWhiteSpace(newContactEmail) && board != null)
+        {
+            await BoardService.AddCardContactAsync(board.Id, laneId, cardId, newContactName.Trim(), newContactEmail.Trim());
+            board = await BoardService.GetBoardAsync(board.Id);
+            CancelAddContact();
+        }
+    }
+
+    private async Task DeleteContact(Guid laneId, Guid cardId, Guid contactId)
+    {
+        if (board != null)
+        {
+            await BoardService.DeleteCardContactAsync(board.Id, laneId, cardId, contactId);
             board = await BoardService.GetBoardAsync(board.Id);
         }
     }
@@ -3595,9 +4869,13 @@
             if (File.Exists(dataFilePath))
             {
                 var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                var backupFolder = Path.Combine(documentsPath, "ArcFlow-Backups");
+                
+                Directory.CreateDirectory(backupFolder);
+                
                 var dateStamp = DateTime.Now.ToString("yyyyMMddHHmmss");
                 var backupFileName = $"BoardCollection-{dateStamp}.json";
-                var backupPath = Path.Combine(documentsPath, backupFileName);
+                var backupPath = Path.Combine(backupFolder, backupFileName);
                 
                 await File.WriteAllTextAsync(backupPath, await File.ReadAllTextAsync(dataFilePath));
                 

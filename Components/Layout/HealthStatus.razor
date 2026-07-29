@@ -1,0 +1,106 @@
+@using ProjectManagementApp.HealthChecks
+@inject HealthService HealthService
+@implements IDisposable
+@rendermode InteractiveServer
+
+<div class="health-bar @(IsExpanded ? "expanded" : "")">
+    <button class="health-summary" @onclick="Toggle" title="System component status">
+        <span class="health-dot @OverallCssClass"></span>
+        <span class="health-summary-text">System: @OverallState</span>
+        <span class="health-caret">@(IsExpanded ? "▴" : "▾")</span>
+    </button>
+
+    @if (IsExpanded)
+    {
+        <div class="health-details">
+            @foreach (var c in components)
+            {
+                <div class="health-row">
+                    <span class="health-dot @CssClass(c.State)"></span>
+                    <span class="health-name">@c.Name</span>
+                    <span class="health-state @CssClass(c.State)">@c.State</span>
+                    @if (c.LatencyMs is double ms && c.State != HealthState.Unreachable)
+                    {
+                        <span class="health-latency">@ms.ToString("0") ms</span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(c.Detail))
+                    {
+                        <span class="health-detail" title="@c.Detail">@c.Detail</span>
+                    }
+                </div>
+            }
+            <div class="health-footer">
+                <span>Last checked: @lastChecked.ToString("HH:mm:ss")</span>
+                <button class="health-refresh" @onclick="RefreshAsync">Refresh</button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<ComponentHealth> components = Array.Empty<ComponentHealth>();
+    private DateTime lastChecked = DateTime.Now;
+    private bool IsExpanded;
+    private PeriodicTimer? timer;
+    private CancellationTokenSource? cts;
+
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(7);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await RefreshAsync();
+            cts = new CancellationTokenSource();
+            timer = new PeriodicTimer(PollInterval);
+            _ = PollLoopAsync(cts.Token);
+        }
+    }
+
+    private async Task PollLoopAsync(CancellationToken token)
+    {
+        try
+        {
+            while (await timer!.WaitForNextTickAsync(token))
+            {
+                await RefreshAsync();
+            }
+        }
+        catch (OperationCanceledException) { /* disposing */ }
+    }
+
+    private async Task RefreshAsync()
+    {
+        var token = cts?.Token ?? CancellationToken.None;
+        var results = await HealthService.CheckAllAsync(token);
+        components = results;
+        lastChecked = DateTime.Now;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void Toggle() => IsExpanded = !IsExpanded;
+
+    private HealthState OverallState => components.Count == 0
+        ? HealthState.Unknown
+        : components.Any(c => c.State == HealthState.Unreachable) ? HealthState.Unreachable
+        : components.Any(c => c.State == HealthState.Degraded) ? HealthState.Degraded
+        : components.Any(c => c.State == HealthState.Unknown) ? HealthState.Degraded
+        : HealthState.Healthy;
+
+    private string OverallCssClass => CssClass(OverallState);
+
+    private static string CssClass(HealthState state) => state switch
+    {
+        HealthState.Healthy => "is-healthy",
+        HealthState.Degraded => "is-degraded",
+        HealthState.Unreachable => "is-unreachable",
+        _ => "is-unknown"
+    };
+
+    public void Dispose()
+    {
+        cts?.Cancel();
+        timer?.Dispose();
+        cts?.Dispose();
+    }
+}

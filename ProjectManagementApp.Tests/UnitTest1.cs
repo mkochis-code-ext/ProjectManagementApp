@@ -10,7 +10,7 @@ public class HomePageTests : BunitContext
 {
     public HomePageTests()
     {
-        Services.AddScoped<BoardService>();
+        Services.AddScoped<IBoardService, BoardService>();
     }
 
     [Fact]
