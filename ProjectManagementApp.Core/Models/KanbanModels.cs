@@ -25,6 +25,7 @@ public class Lane
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
     public int Order { get; set; }
+    public bool IsArchived { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public List<Card> Cards { get; set; } = new();
 }

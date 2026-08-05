@@ -98,6 +98,20 @@ public class BoardTools
         return "Lane updated.";
     }
 
+    [McpServerTool, Description("Archive or unarchive a lane. Archived lanes are hidden on the board unless completed items are shown.")]
+    public static async Task<string> SetLaneArchived(IBoardService svc, Guid boardId, Guid laneId, bool isArchived)
+    {
+        await svc.SetLaneArchivedAsync(boardId, laneId, isArchived);
+        return isArchived ? "Lane archived." : "Lane unarchived.";
+    }
+
+    [McpServerTool, Description("Move a lane one position in display order. Use direction -1 to move earlier, 1 to move later.")]
+    public static async Task<string> MoveLane(IBoardService svc, Guid boardId, Guid laneId, int direction)
+    {
+        await svc.MoveLaneAsync(boardId, laneId, direction);
+        return "Lane moved.";
+    }
+
     [McpServerTool, Description("Delete a lane and its cards.")]
     public static async Task<string> DeleteLane(IBoardService svc, Guid boardId, Guid laneId)
     {

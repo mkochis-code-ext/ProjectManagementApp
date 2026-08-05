@@ -303,6 +303,38 @@ public class BoardService : IBoardService
         }
     }
 
+    public async Task SetLaneArchivedAsync(Guid boardId, Guid laneId, bool isArchived)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        var lane = board?.Lanes.FirstOrDefault(l => l.Id == laneId);
+        if (lane != null)
+        {
+            lane.IsArchived = isArchived;
+            board!.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+        }
+    }
+
+    public async Task MoveLaneAsync(Guid boardId, Guid laneId, int direction)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        if (board == null || direction == 0) return;
+
+        var ordered = board.Lanes.OrderBy(l => l.Order).ToList();
+        var index = ordered.FindIndex(l => l.Id == laneId);
+        if (index < 0) return;
+
+        var targetIndex = index + Math.Sign(direction);
+        if (targetIndex < 0 || targetIndex >= ordered.Count) return;
+
+        // Normalize orders to indices, then swap with the neighbor.
+        for (var i = 0; i < ordered.Count; i++) ordered[i].Order = i;
+        (ordered[index].Order, ordered[targetIndex].Order) = (ordered[targetIndex].Order, ordered[index].Order);
+
+        board.LastModified = DateTime.UtcNow;
+        await SaveCollectionAsync();
+    }
+
     public async Task DeleteLaneAsync(Guid boardId, Guid laneId)
     {
         var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);

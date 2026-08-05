@@ -33,6 +33,9 @@ public interface IBoardService
 
     Task<Lane> AddLaneAsync(Guid boardId, string name);
     Task UpdateLaneAsync(Guid boardId, Guid laneId, string name);
+    Task SetLaneArchivedAsync(Guid boardId, Guid laneId, bool isArchived);
+    // Moves a lane one position in display order; direction is negative (earlier) or positive (later).
+    Task MoveLaneAsync(Guid boardId, Guid laneId, int direction);
     Task DeleteLaneAsync(Guid boardId, Guid laneId);
 
     Task<Card> AddCardAsync(Guid boardId, Guid laneId, string title, string description);

@@ -82,6 +82,16 @@ boards.MapPut("/{boardId:guid}/lanes/{laneId:guid}", async (Guid boardId, Guid l
     await svc.UpdateLaneAsync(boardId, laneId, req.Name);
     return Results.NoContent();
 });
+boards.MapPost("/{boardId:guid}/lanes/{laneId:guid}/archive", async (Guid boardId, Guid laneId, ArchiveRequest req, BoardService svc) =>
+{
+    await svc.SetLaneArchivedAsync(boardId, laneId, req.IsArchived);
+    return Results.NoContent();
+});
+boards.MapPost("/{boardId:guid}/lanes/{laneId:guid}/move", async (Guid boardId, Guid laneId, MoveLaneRequest req, BoardService svc) =>
+{
+    await svc.MoveLaneAsync(boardId, laneId, req.Direction);
+    return Results.NoContent();
+});
 boards.MapDelete("/{boardId:guid}/lanes/{laneId:guid}", async (Guid boardId, Guid laneId, BoardService svc) =>
 {
     await svc.DeleteLaneAsync(boardId, laneId);
@@ -212,6 +222,8 @@ record CreateBoardRequest(string Name, string LaneLabel = "Lane", string CardLab
 record UpdateBoardRequest(string Name, string LaneLabel, string CardLabel, string TodoLabel);
 record ViewModeRequest(bool IsCondensed);
 record NameRequest(string Name);
+record ArchiveRequest(bool IsArchived);
+record MoveLaneRequest(int Direction);
 record CardRequest(string Title, string Description);
 record CompletionRequest(bool IsCompleted);
 record MoveCardRequest(Guid FromLaneId, Guid ToLaneId);

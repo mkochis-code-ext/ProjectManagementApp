@@ -442,15 +442,22 @@
     @if (board != null)
     {
         <div class="kanban-board @(isCondensedView ? "condensed" : "")">
-            @foreach (var lane in board.Lanes.OrderBy(l => l.Order))
+            @foreach (var lane in board.Lanes.Where(l => showCompleted || !l.IsArchived).OrderBy(l => l.Order))
             {
-                <div class="swimlane @(IsLaneCollapsed(lane.Id) ? "collapsed" : "")">
+                <div class="swimlane @(IsLaneCollapsed(lane.Id) ? "collapsed" : "") @(lane.IsArchived ? "archived" : "")">
                     <div class="swimlane-header">
                         @if (editingLaneId == lane.Id)
                         {
-                            <input type="text" @bind="editingLaneName" @onkeyup="e => HandleLaneEditKeyPress(e, lane.Id)" class="edit-input" />
-                            <button class="btn-icon" @onclick="() => SaveLaneEdit(lane.Id)">✓</button>
-                            <button class="btn-icon" @onclick="CancelLaneEdit">✕</button>
+                            <div class="lane-edit">
+                                <input type="text" @bind="editingLaneName" @onkeyup="e => HandleLaneEditKeyPress(e, lane.Id)" class="edit-input" />
+                                <div class="lane-edit-actions">
+                                    <button class="btn-icon" @onclick="() => SaveLaneEdit(lane.Id)" title="Save">✓</button>
+                                    <button class="btn-icon" @onclick="CancelLaneEdit" title="Cancel">✕</button>
+                                    <button class="btn-icon" @onclick="() => MoveLane(lane.Id, -1)" title="Move earlier in display order">−</button>
+                                    <button class="btn-icon" @onclick="() => MoveLane(lane.Id, 1)" title="Move later in display order">+</button>
+                                    <button class="btn-icon" @onclick="() => ToggleLaneArchived(lane)" title="@(lane.IsArchived ? "Unarchive" : "Archive")">@(lane.IsArchived ? "📂" : "📦")</button>
+                                </div>
+                            </div>
                         }
                         else
                         {
@@ -458,6 +465,10 @@
                                 <span class="collapse-icon @(IsLaneCollapsed(lane.Id) ? "collapsed" : "")">▼</span>
                             </button>
                             <h3>@lane.Name</h3>
+                            @if (lane.IsArchived)
+                            {
+                                <span class="lane-collapsed-summary">archived</span>
+                            }
                             @if (IsLaneCollapsed(lane.Id))
                             {
                                 <span class="lane-collapsed-summary">@lane.Cards.Count(c => !c.IsCompleted) active</span>
@@ -3067,12 +3078,32 @@
 
     .edit-input {
         flex: 1;
+        min-width: 0;
         padding: 5px;
         border: 1px solid var(--accent-primary);
         border-radius: 4px;
         font-size: 14px;
         background: var(--bg-tertiary);
         color: var(--text-primary);
+    }
+
+    .lane-edit {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .lane-edit .edit-input {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .lane-edit-actions {
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
     }
 </style>
 
@@ -3497,6 +3528,25 @@
     {
         editingLaneId = null;
         editingLaneName = "";
+    }
+
+    private async Task MoveLane(Guid laneId, int direction)
+    {
+        if (board != null)
+        {
+            await BoardService.MoveLaneAsync(board.Id, laneId, direction);
+            board = await BoardService.GetBoardAsync(board.Id);
+        }
+    }
+
+    private async Task ToggleLaneArchived(Lane lane)
+    {
+        if (board != null)
+        {
+            await BoardService.SetLaneArchivedAsync(board.Id, lane.Id, !lane.IsArchived);
+            board = await BoardService.GetBoardAsync(board.Id);
+            CancelLaneEdit();
+        }
     }
 
     private async Task DeleteLane(Guid laneId)

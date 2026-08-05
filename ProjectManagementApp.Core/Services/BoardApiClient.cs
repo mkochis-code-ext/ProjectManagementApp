@@ -83,6 +83,12 @@ public class BoardApiClient : IBoardService
     public Task UpdateLaneAsync(Guid boardId, Guid laneId, string name) =>
         Put($"api/boards/{boardId}/lanes/{laneId}", new { name });
 
+    public Task SetLaneArchivedAsync(Guid boardId, Guid laneId, bool isArchived) =>
+        Post($"api/boards/{boardId}/lanes/{laneId}/archive", new { isArchived });
+
+    public Task MoveLaneAsync(Guid boardId, Guid laneId, int direction) =>
+        Post($"api/boards/{boardId}/lanes/{laneId}/move", new { direction });
+
     public Task DeleteLaneAsync(Guid boardId, Guid laneId) =>
         Delete($"api/boards/{boardId}/lanes/{laneId}");
 
