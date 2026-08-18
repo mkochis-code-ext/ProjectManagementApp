@@ -511,7 +511,7 @@ public class BoardService : IBoardService
     }
 
     // Todo operations
-    public async Task<TodoItem> AddTodoAsync(Guid boardId, Guid laneId, Guid cardId, string text, bool isTodaysTodo = false, string notes = "")
+    public async Task<TodoItem> AddTodoAsync(Guid boardId, Guid laneId, Guid cardId, string text, bool isTodaysTodo = false, string notes = "", DateTime? dueDate = null)
     {
         var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
         var lane = board?.Lanes.FirstOrDefault(l => l.Id == laneId);
@@ -523,7 +523,8 @@ public class BoardService : IBoardService
                 Text = text,
                 Order = card.Todos.Count,
                 IsTodaysTodo = isTodaysTodo,
-                Notes = notes
+                Notes = notes,
+                DueDate = dueDate
             };
             card.Todos.Add(todo);
             board!.LastModified = DateTime.UtcNow;
@@ -578,7 +579,7 @@ public class BoardService : IBoardService
     }
 
     // Board-level todo operations
-    public async Task<TodoItem> AddBoardTodoAsync(Guid boardId, string text, bool isTodaysTodo = false, string notes = "")
+    public async Task<TodoItem> AddBoardTodoAsync(Guid boardId, string text, bool isTodaysTodo = false, string notes = "", DateTime? dueDate = null)
     {
         var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
         if (board != null)
@@ -588,7 +589,8 @@ public class BoardService : IBoardService
                 Text = text,
                 Order = board.Todos.Count,
                 IsTodaysTodo = isTodaysTodo,
-                Notes = notes
+                Notes = notes,
+                DueDate = dueDate
             };
             board.Todos.Add(todo);
             board.LastModified = DateTime.UtcNow;
@@ -673,6 +675,33 @@ public class BoardService : IBoardService
         if (todo != null)
         {
             todo.Notes = notes;
+            board!.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+        }
+    }
+
+    // Todo due date operations
+    public async Task UpdateTodoDueDateAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, DateTime? dueDate)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        var lane = board?.Lanes.FirstOrDefault(l => l.Id == laneId);
+        var card = lane?.Cards.FirstOrDefault(c => c.Id == cardId);
+        var todo = card?.Todos.FirstOrDefault(t => t.Id == todoId);
+        if (todo != null)
+        {
+            todo.DueDate = dueDate;
+            board!.LastModified = DateTime.UtcNow;
+            await SaveCollectionAsync();
+        }
+    }
+
+    public async Task UpdateBoardTodoDueDateAsync(Guid boardId, Guid todoId, DateTime? dueDate)
+    {
+        var board = _collection.Boards.FirstOrDefault(b => b.Id == boardId);
+        var todo = board?.Todos.FirstOrDefault(t => t.Id == todoId);
+        if (todo != null)
+        {
+            todo.DueDate = dueDate;
             board!.LastModified = DateTime.UtcNow;
             await SaveCollectionAsync();
         }

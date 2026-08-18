@@ -23,15 +23,13 @@ public class HomePageTests : BunitContext
     }
 
     [Fact]
-    public void HomePage_HasShowCompletedCheckbox()
+    public void HomePage_HasShowCompletedToggle()
     {
         var cut = Render<Home>();
 
-        var checkbox = cut.Find("input[type='checkbox']");
-        Assert.NotNull(checkbox);
-
-        var label = cut.Find("label.show-completed");
-        Assert.Contains("Show Completed", label.TextContent);
+        var button = cut.Find("button.btn-header-action[title='Show Completed']");
+        Assert.NotNull(button);
+        Assert.Contains("Show Done", button.TextContent);
     }
 
     [Fact]
@@ -115,13 +113,13 @@ public class HomePageTests : BunitContext
     }
 
     [Fact]
-    public void HomePage_HasSidebarShowCompletedToggle()
+    public void HomePage_SidebarHeaderShowsActiveState()
     {
         var cut = Render<Home>();
 
-        var label = cut.Find("label.show-completed-todos");
-        Assert.NotNull(label);
-        Assert.Contains("Show Completed", label.TextContent);
+        var header = cut.Find(".sidebar-header h2");
+        Assert.NotNull(header);
+        Assert.Contains("Active", header.TextContent);
     }
 
     [Fact]
@@ -166,8 +164,8 @@ public class HomePageTests : BunitContext
     {
         var cut = Render<Home>();
 
-        var button = cut.Find(".btn-collapse-all");
-        Assert.NotNull(button);
+        var collapseIcons = cut.FindAll("button.btn-header-action .collapse-icon-sm");
+        Assert.NotEmpty(collapseIcons);
     }
 
     [Fact]
@@ -225,8 +223,7 @@ public class HomePageTests : BunitContext
     {
         var cut = Render<Home>();
 
-        var newBoardBtn = cut.Find(".board-selector button.btn-icon[title='New Board']");
-        newBoardBtn.Click();
+        cut.InvokeAsync(() => cut.Find(".board-selector button.btn-icon[title='New Board']").Click());
 
         var modal = cut.Find(".modal-dialog");
         Assert.NotNull(modal);

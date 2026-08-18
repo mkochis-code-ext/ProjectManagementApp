@@ -22,7 +22,7 @@
         <div class="sidebar-todos">
             @foreach (var todoInfo in GetSidebarTodos())
             {
-                <div @key="todoInfo.Todo.Id" class="sidebar-todo-item @(todoInfo.Todo.IsCompleted ? "completed" : "") @(todoInfo.IsBoardLevel ? "board-level" : "") @(todoInfo.Todo.IsTodaysTodo && !todoInfo.Todo.IsCompleted ? "todays-todo" : "") @(IsSidebarTodoExpanded(todoInfo.Todo.Id) ? "expanded" : "")" 
+                <div @key="todoInfo.Todo.Id" class="sidebar-todo-item @(todoInfo.Todo.IsCompleted ? "completed" : "") @(todoInfo.IsBoardLevel ? "board-level" : "") @(todoInfo.Todo.IsTodaysTodo && !todoInfo.Todo.IsCompleted ? "todays-todo" : "") @(IsTodoDue(todoInfo.Todo) ? "overdue" : "") @(IsSidebarTodoExpanded(todoInfo.Todo.Id) ? "expanded" : "")" 
                      title="@(todoInfo.IsBoardLevel ? "Board-level " + (board?.TodoLabel ?? "Todo") : (board?.LaneLabel ?? "Lane") + ": " + todoInfo.LaneName + "\n" + (board?.CardLabel ?? "Card") + ": " + todoInfo.CardTitle)">
                     <div class="sidebar-todo-main">
                         <div class="sidebar-todo-content">
@@ -50,6 +50,10 @@
                                             <span class="sidebar-todo-context">@todoInfo.LaneName › @todoInfo.CardTitle</span>
                                         }
                                     </div>
+                                    @if (todoInfo.Todo.DueDate.HasValue)
+                                    {
+                                        <span class="sidebar-todo-due @(IsTodoDue(todoInfo.Todo) ? "overdue" : "")" title="Due @todoInfo.Todo.DueDate.Value.ToString("MMM d, yyyy")">📅 @todoInfo.Todo.DueDate.Value.ToString("MMM d")</span>
+                                    }
                                 </div>
                             }
                         </div>
@@ -73,6 +77,10 @@
                     @if (IsSidebarTodoExpanded(todoInfo.Todo.Id))
                     {
                         <div class="sidebar-todo-expanded">
+                            <div class="sidebar-due-section">
+                                <span class="sidebar-due-label">📅 Due Date</span>
+                                <input type="date" class="sidebar-due-input" value="@(todoInfo.Todo.DueDate?.ToString("yyyy-MM-dd"))" @onchange="e => SaveSidebarTodoDueDate(todoInfo, e)" />
+                            </div>
                             <div class="sidebar-notes-section">
                                 <div class="sidebar-notes-header">
                                     <span class="sidebar-notes-icon">📝</span>
@@ -307,7 +315,7 @@
                         <option value="">Select @(board?.LaneLabel ?? "Lane")...</option>
                         @if (board != null)
                         {
-                            @foreach (var lane in board.Lanes.Where(l => l.Cards.Any()).OrderBy(l => l.Order))
+                            @foreach (var lane in board.Lanes.Where(l => !l.IsArchived).OrderBy(l => l.Order))
                             {
                                 <option value="@lane.Id">@lane.Name</option>
                             }
@@ -316,16 +324,33 @@
                 </div>
                 <div class="form-group">
                     <label>@(board?.CardLabel ?? "Card") <span class="optional-label">(optional)</span></label>
-                    <select @bind="quickTodoCardId" class="modal-select" disabled="@(quickTodoLaneId == Guid.Empty)">
-                        <option value="">Select @(board?.CardLabel ?? "Card")...</option>
-                        @if (board != null && quickTodoLaneId != Guid.Empty)
+                    @if (quickTodoCreateNewCard)
+                    {
+                        <div class="new-card-row">
+                            <input type="text" placeholder="New @(board?.CardLabel ?? "Card") title" @bind="quickTodoNewCardTitle" @bind:event="oninput" class="modal-input new-card-input" />
+                            <button type="button" class="btn-cancel-new-card" @onclick="CancelCreateNewCard" title="Use existing @(board?.CardLabel ?? "Card")">✕</button>
+                        </div>
+                        @if (showQuickTodoValidation && string.IsNullOrWhiteSpace(quickTodoNewCardTitle))
                         {
-                            @foreach (var card in board.Lanes.FirstOrDefault(l => l.Id == quickTodoLaneId)?.Cards.OrderBy(c => c.Order) ?? Enumerable.Empty<Card>())
-                            {
-                                <option value="@card.Id">@card.Title</option>
-                            }
+                            <span class="validation-error">@(board?.CardLabel ?? "Card") title is required</span>
                         }
-                    </select>
+                    }
+                    else
+                    {
+                        <div class="new-card-row">
+                            <select @bind="quickTodoCardId" class="modal-select" disabled="@(quickTodoLaneId == Guid.Empty)">
+                                <option value="">Select @(board?.CardLabel ?? "Card")...</option>
+                                @if (board != null && quickTodoLaneId != Guid.Empty)
+                                {
+                                    @foreach (var card in board.Lanes.FirstOrDefault(l => l.Id == quickTodoLaneId)?.Cards.OrderBy(c => c.Order) ?? Enumerable.Empty<Card>())
+                                    {
+                                        <option value="@card.Id">@card.Title</option>
+                                    }
+                                }
+                            </select>
+                            <button type="button" class="btn-new-card" @onclick="StartCreateNewCard" disabled="@(quickTodoLaneId == Guid.Empty)" title="Create new @(board?.CardLabel ?? "Card")">+ New</button>
+                        </div>
+                    }
                 </div>
                 <div class="todo-input-row">
                     <input @ref="quickTodoTextInput" type="text" placeholder="@(board?.TodoLabel ?? "Todo") text" @bind="quickTodoText" @bind:event="oninput" class="modal-input todo-text-input" />
@@ -338,6 +363,16 @@
                     <span class="validation-error">@(board?.TodoLabel ?? "Todo") text is required</span>
                 }
                 <div class="form-group">
+                    <label>Due Date <span class="optional-label">(optional)</span></label>
+                    <div class="due-date-row">
+                        <input type="date" @bind="quickTodoDueDate" class="modal-input due-date-input" />
+                        @if (quickTodoDueDate.HasValue)
+                        {
+                            <button type="button" class="btn-clear-due-date" @onclick="() => quickTodoDueDate = null" title="Clear due date">✕</button>
+                        }
+                    </div>
+                </div>
+                <div class="form-group">
                     <label>Notes <span class="optional-label">(optional)</span></label>
                     <textarea placeholder="Add notes..." @bind="quickTodoNotes" class="modal-textarea quick-todo-notes"></textarea>
                 </div>
@@ -346,7 +381,11 @@
                     <span class="validation-error">Please select both a @(board?.LaneLabel ?? "Lane") and @(board?.CardLabel ?? "Card"), or leave both empty for a board-level @(board?.TodoLabel?.ToLower() ?? "todo")</span>
                 }
                 <p class="modal-info @(IsBoardLevelTodo() ? "board-level-info" : "card-level-info")">
-                    @if (IsBoardLevelTodo())
+                    @if (quickTodoCreateNewCard)
+                    {
+                        <span>✨ This @(board?.TodoLabel?.ToLower() ?? "todo") will be added to a new @(board?.CardLabel?.ToLower() ?? "card") <strong>@(string.IsNullOrWhiteSpace(quickTodoNewCardTitle) ? "(unnamed)" : quickTodoNewCardTitle)</strong></span>
+                    }
+                    else if (IsBoardLevelTodo())
                     {
                         <span>📋 This @(board?.TodoLabel?.ToLower() ?? "todo") will be added to the <strong>board</strong></span>
                     }
@@ -515,10 +554,10 @@
                                             <div class="todo-header">
                                                 <span>@(board?.TodoLabel ?? "Todo")s (@card.Todos.Count(t => !t.IsCompleted) active)</span>
                                             </div>
-                                            @foreach (var todo in card.Todos.Where(t => showCompleted || !t.IsCompleted).OrderByDescending(t => t.IsTodaysTodo && !t.IsCompleted).ThenBy(t => t.Order))
+                                            @foreach (var todo in card.Todos.Where(t => showCompleted || !t.IsCompleted).OrderByDescending(t => IsTodoDue(t)).ThenByDescending(t => t.IsTodaysTodo && !t.IsCompleted).ThenBy(t => t.Order))
                                             {
                                                 <div class="todo-item-wrapper @(IsCardTodoExpanded(todo.Id) ? "expanded" : "")">
-                                                    <div class="todo-item @(todo.IsCompleted ? "completed" : "") @(todo.IsTodaysTodo && !todo.IsCompleted ? "todays-todo" : "")">
+                                                    <div class="todo-item @(todo.IsCompleted ? "completed" : "") @(todo.IsTodaysTodo && !todo.IsCompleted ? "todays-todo" : "") @(IsTodoDue(todo) ? "overdue" : "")">
                                                         <div class="todo-item-main">
                                                             <div class="todo-item-content">
                                                                 @if (editingCardTodoId == todo.Id)
@@ -535,6 +574,10 @@
                                                                 else
                                                                 {
                                                                     <span class="todo-text" @ondblclick="() => StartEditCardTodo(lane.Id, card.Id, todo)" @ondblclick:stopPropagation="true">@todo.Text</span>
+                                                                }
+                                                                @if (todo.DueDate.HasValue)
+                                                                {
+                                                                    <span class="todo-due @(IsTodoDue(todo) ? "overdue" : "")" title="Due @todo.DueDate.Value.ToString("MMM d, yyyy")">📅 @todo.DueDate.Value.ToString("MMM d")</span>
                                                                 }
                                                             </div>
                                                             @if (editingCardTodoId != todo.Id)
@@ -564,6 +607,10 @@
                                                     @if (IsCardTodoExpanded(todo.Id))
                                                     {
                                                         <div class="todo-expanded">
+                                                            <div class="todo-due-section">
+                                                                <span class="todo-due-label">📅 Due Date</span>
+                                                                <input type="date" class="todo-due-input" value="@(todo.DueDate?.ToString("yyyy-MM-dd"))" @onchange="e => SaveCardTodoDueDate(lane.Id, card.Id, todo.Id, e)" @onclick:stopPropagation="true" />
+                                                            </div>
                                                             <div class="todo-notes-section">
                                                                 <div class="todo-notes-header">
                                                                     <span class="todo-notes-icon">📝</span>
@@ -630,6 +677,7 @@
                                                    @onkeydown="e => HandleTodoKeyDown(e, lane.Id, card.Id)"
                                                    placeholder="@(board?.TodoLabel ?? "Todo") text..." 
                                                    class="todo-input" />
+                                            <input type="date" @bind="newTodoDueDate" class="todo-date-input" title="Due date (optional)" />
                                             <button class="btn-icon" @onclick="() => AddTodo(lane.Id, card.Id)">✓</button>
                                             <button class="btn-icon" @onclick="CancelAddTodo">✕</button>
                                         }
@@ -1130,6 +1178,57 @@
         border-bottom: 2px solid var(--btn-reactivate-color);
     }
 
+    .sidebar-todo-item.overdue {
+        border: 2px solid var(--validation-error);
+        background: rgba(248, 81, 73, 0.08);
+    }
+
+    .sidebar-todo-item.overdue.board-level {
+        border-left: 3px solid var(--validation-error);
+    }
+
+    .sidebar-todo-due {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        flex-shrink: 0;
+        font-size: 11px;
+        padding: 1px 6px;
+        border-radius: 10px;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        white-space: nowrap;
+    }
+
+    .sidebar-todo-due.overdue {
+        background: rgba(248, 81, 73, 0.15);
+        color: var(--validation-error);
+        font-weight: 600;
+    }
+
+    .sidebar-due-section {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+
+    .sidebar-due-label {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-secondary);
+    }
+
+    .sidebar-due-input {
+        padding: 4px 8px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        font-size: 12px;
+    }
+
     .sidebar-todo-expanded {
         margin-top: 8px;
         padding-top: 8px;
@@ -1452,6 +1551,96 @@
     .modal-select:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+    }
+
+    .new-card-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .new-card-row .modal-select,
+    .new-card-row .new-card-input {
+        flex: 1;
+        margin-bottom: 0;
+    }
+
+    .btn-new-card {
+        flex-shrink: 0;
+        padding: 12px 14px;
+        border: 2px solid var(--accent-primary);
+        border-radius: 8px;
+        background: var(--bg-tertiary);
+        color: var(--accent-primary);
+        font-size: 14px;
+        font-weight: 500;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn-new-card:hover:not(:disabled) {
+        background: var(--accent-primary);
+        color: white;
+    }
+
+    .btn-new-card:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .btn-cancel-new-card {
+        flex-shrink: 0;
+        padding: 12px 14px;
+        border: 2px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn-cancel-new-card:hover {
+        border-color: var(--validation-error);
+        color: var(--validation-error);
+    }
+
+    .due-date-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .due-date-row .due-date-input {
+        flex: 1;
+        margin-bottom: 0;
+    }
+
+    .btn-clear-due-date {
+        flex-shrink: 0;
+        padding: 12px 14px;
+        border: 2px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn-clear-due-date:hover {
+        border-color: var(--validation-error);
+        color: var(--validation-error);
+    }
+
+    .todo-date-input {
+        padding: 6px 8px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        font-size: 12px;
     }
 
     .validation-error {
@@ -2191,6 +2380,55 @@
         border: 1px solid var(--btn-reactivate-color);
         background: rgba(210, 153, 34, 0.08);
         border-radius: 4px;
+    }
+
+    .todo-item.overdue {
+        border: 1px solid var(--validation-error);
+        background: rgba(248, 81, 73, 0.08);
+        border-radius: 4px;
+    }
+
+    .todo-due {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        align-self: flex-start;
+        margin-top: 2px;
+        font-size: 11px;
+        padding: 1px 6px;
+        border-radius: 10px;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        white-space: nowrap;
+    }
+
+    .todo-due.overdue {
+        background: rgba(248, 81, 73, 0.15);
+        color: var(--validation-error);
+        font-weight: 600;
+    }
+
+    .todo-due-section {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+
+    .todo-due-label {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-secondary);
+    }
+
+    .todo-due-input {
+        padding: 4px 8px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+        font-size: 12px;
     }
 
     .todo-item-main {
@@ -3169,6 +3407,7 @@
     // Todo inline add
     private Guid? addingTodoForCardId;
     private string newTodoText = "";
+    private DateTime? newTodoDueDate;
 
     // Quick add todo panel
     private bool showQuickAddTodoPanel = false;
@@ -3180,6 +3419,9 @@
     private bool showQuickTodoValidation = false;
     private ElementReference quickTodoTextInput;
     private bool shouldFocusQuickTodoInput = false;
+    private bool quickTodoCreateNewCard = false;
+    private string quickTodoNewCardTitle = "";
+    private DateTime? quickTodoDueDate;
 
     // Report configuration panel
     private bool showReportConfigPanel = false;
@@ -3770,12 +4012,14 @@
     {
         addingTodoForCardId = cardId;
         newTodoText = "";
+        newTodoDueDate = null;
     }
 
     private void CancelAddTodo()
     {
         addingTodoForCardId = null;
         newTodoText = "";
+        newTodoDueDate = null;
     }
 
     private async Task HandleTodoKeyDown(KeyboardEventArgs e, Guid laneId, Guid cardId)
@@ -3794,9 +4038,10 @@
     {
         if (!string.IsNullOrWhiteSpace(newTodoText) && board != null)
         {
-            await BoardService.AddTodoAsync(board.Id, laneId, cardId, newTodoText.Trim());
+            await BoardService.AddTodoAsync(board.Id, laneId, cardId, newTodoText.Trim(), false, "", newTodoDueDate);
             board = await BoardService.GetBoardAsync(board.Id);
             newTodoText = "";
+            newTodoDueDate = null;
         }
     }
 
@@ -3856,8 +4101,39 @@
 
         return boardTodos.Concat(cardTodos)
             .OrderBy(t => t.Todo.IsCompleted)
+            .ThenByDescending(t => IsTodoDue(t.Todo))
             .ThenByDescending(t => t.Todo.IsTodaysTodo && !t.Todo.IsCompleted)
+            .ThenBy(t => t.Todo.DueDate ?? DateTime.MaxValue)
             .ThenByDescending(t => t.Todo.CreatedAt);
+    }
+
+    // A todo is "due" (overdue or due today) when it has a due date on or before today and is still open.
+    private static bool IsTodoDue(TodoItem todo) =>
+        !todo.IsCompleted && todo.DueDate is DateTime due && due.Date <= DateTime.Today;
+
+    private static DateTime? ParseDueDate(ChangeEventArgs e) =>
+        DateTime.TryParse(e.Value?.ToString(), out var d) ? d.Date : null;
+
+    private async Task SaveSidebarTodoDueDate(TodoInfo todoInfo, ChangeEventArgs e)
+    {
+        if (board == null) return;
+        var dueDate = ParseDueDate(e);
+        if (todoInfo.IsBoardLevel)
+        {
+            await BoardService.UpdateBoardTodoDueDateAsync(board.Id, todoInfo.Todo.Id, dueDate);
+        }
+        else
+        {
+            await BoardService.UpdateTodoDueDateAsync(board.Id, todoInfo.LaneId, todoInfo.CardId, todoInfo.Todo.Id, dueDate);
+        }
+        board = await BoardService.GetBoardAsync(board.Id);
+    }
+
+    private async Task SaveCardTodoDueDate(Guid laneId, Guid cardId, Guid todoId, ChangeEventArgs e)
+    {
+        if (board == null) return;
+        await BoardService.UpdateTodoDueDateAsync(board.Id, laneId, cardId, todoId, ParseDueDate(e));
+        board = await BoardService.GetBoardAsync(board.Id);
     }
 
     private async Task ToggleSidebarTodo(TodoInfo todoInfo)
@@ -4514,11 +4790,15 @@
 
     private bool IsBoardLevelTodo()
     {
-        return quickTodoLaneId == Guid.Empty && quickTodoCardId == Guid.Empty;
+        return !quickTodoCreateNewCard && quickTodoLaneId == Guid.Empty && quickTodoCardId == Guid.Empty;
     }
 
     private bool IsPartialSelection()
     {
+        if (quickTodoCreateNewCard)
+        {
+            return false;
+        }
         return (quickTodoLaneId != Guid.Empty && quickTodoCardId == Guid.Empty) ||
                (quickTodoLaneId == Guid.Empty && quickTodoCardId != Guid.Empty);
     }
@@ -4538,6 +4818,9 @@
         quickTodoText = "";
         quickTodoNotes = "";
         quickTodoIsTodaysTodo = false;
+        quickTodoCreateNewCard = false;
+        quickTodoNewCardTitle = "";
+        quickTodoDueDate = null;
         showQuickTodoValidation = false;
         showQuickAddTodoPanel = true;
     }
@@ -4551,6 +4834,23 @@
     private void OnQuickTodoLaneChanged()
     {
         quickTodoCardId = Guid.Empty;
+        if (quickTodoLaneId == Guid.Empty)
+        {
+            CancelCreateNewCard();
+        }
+    }
+
+    private void StartCreateNewCard()
+    {
+        quickTodoCreateNewCard = true;
+        quickTodoCardId = Guid.Empty;
+        quickTodoNewCardTitle = "";
+    }
+
+    private void CancelCreateNewCard()
+    {
+        quickTodoCreateNewCard = false;
+        quickTodoNewCardTitle = "";
     }
 
     private async Task HandleQuickAddTodoKeyDown(KeyboardEventArgs e)
@@ -4573,21 +4873,30 @@
             return;
         }
 
+        if (quickTodoCreateNewCard)
+        {
+            // Create a new card in the selected lane, then add the todo to it
+            if (quickTodoLaneId == Guid.Empty || string.IsNullOrWhiteSpace(quickTodoNewCardTitle))
+            {
+                return;
+            }
+            var newCard = await BoardService.AddCardAsync(board.Id, quickTodoLaneId, quickTodoNewCardTitle.Trim(), "");
+            await BoardService.AddTodoAsync(board.Id, quickTodoLaneId, newCard.Id, quickTodoText.Trim(), quickTodoIsTodaysTodo, quickTodoNotes.Trim(), quickTodoDueDate);
+        }
         // Validate: must select both lane and card, or neither (for board-level)
-        if (IsPartialSelection())
+        else if (IsPartialSelection())
         {
             return;
         }
-
-        if (IsBoardLevelTodo())
+        else if (IsBoardLevelTodo())
         {
             // Add as board-level todo
-            await BoardService.AddBoardTodoAsync(board.Id, quickTodoText.Trim(), quickTodoIsTodaysTodo, quickTodoNotes.Trim());
+            await BoardService.AddBoardTodoAsync(board.Id, quickTodoText.Trim(), quickTodoIsTodaysTodo, quickTodoNotes.Trim(), quickTodoDueDate);
         }
         else
         {
             // Add as card-level todo
-            await BoardService.AddTodoAsync(board.Id, quickTodoLaneId, quickTodoCardId, quickTodoText.Trim(), quickTodoIsTodaysTodo, quickTodoNotes.Trim());
+            await BoardService.AddTodoAsync(board.Id, quickTodoLaneId, quickTodoCardId, quickTodoText.Trim(), quickTodoIsTodaysTodo, quickTodoNotes.Trim(), quickTodoDueDate);
         }
         
         board = await BoardService.GetBoardAsync(board.Id);

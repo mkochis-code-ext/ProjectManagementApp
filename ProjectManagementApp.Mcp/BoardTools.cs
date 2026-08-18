@@ -182,10 +182,11 @@ public class BoardTools
     }
 
     // Card-level todos
-    [McpServerTool, Description("Add a todo to a card.")]
+    [McpServerTool, Description("Add a todo to a card. Optionally set a due date; a todo due today or earlier is flagged as due/overdue in the UI.")]
     public static Task<TodoItem> AddTodo(IBoardService svc, Guid boardId, Guid laneId, Guid cardId, string text,
-        bool isTodaysTodo = false, string notes = "")
-        => svc.AddTodoAsync(boardId, laneId, cardId, text, isTodaysTodo, notes);
+        bool isTodaysTodo = false, string notes = "",
+        [Description("Optional due date for the todo. Omit or pass null for no due date.")] DateTime? dueDate = null)
+        => svc.AddTodoAsync(boardId, laneId, cardId, text, isTodaysTodo, notes, dueDate);
 
     [McpServerTool, Description("Mark a card todo complete or incomplete.")]
     public static async Task<string> SetTodoCompletion(IBoardService svc, Guid boardId, Guid laneId, Guid cardId, Guid todoId, bool isCompleted)
@@ -215,6 +216,14 @@ public class BoardTools
         return "Todo notes updated.";
     }
 
+    [McpServerTool, Description("Set or clear the due date on a card todo. Pass null to clear it.")]
+    public static async Task<string> UpdateTodoDueDate(IBoardService svc, Guid boardId, Guid laneId, Guid cardId, Guid todoId,
+        [Description("The new due date, or null to clear it.")] DateTime? dueDate)
+    {
+        await svc.UpdateTodoDueDateAsync(boardId, laneId, cardId, todoId, dueDate);
+        return "Todo due date updated.";
+    }
+
     [McpServerTool, Description("Update the text of a card todo.")]
     public static async Task<string> UpdateTodoText(IBoardService svc, Guid boardId, Guid laneId, Guid cardId, Guid todoId, string text)
     {
@@ -234,9 +243,10 @@ public class BoardTools
     }
 
     // Board-level todos
-    [McpServerTool, Description("Add a board-level todo.")]
-    public static Task<TodoItem> AddBoardTodo(IBoardService svc, Guid boardId, string text, bool isTodaysTodo = false, string notes = "")
-        => svc.AddBoardTodoAsync(boardId, text, isTodaysTodo, notes);
+    [McpServerTool, Description("Add a board-level todo. Optionally set a due date; a todo due today or earlier is flagged as due/overdue in the UI.")]
+    public static Task<TodoItem> AddBoardTodo(IBoardService svc, Guid boardId, string text, bool isTodaysTodo = false, string notes = "",
+        [Description("Optional due date for the todo. Omit or pass null for no due date.")] DateTime? dueDate = null)
+        => svc.AddBoardTodoAsync(boardId, text, isTodaysTodo, notes, dueDate);
 
     [McpServerTool, Description("Mark a board-level todo complete or incomplete.")]
     public static async Task<string> SetBoardTodoCompletion(IBoardService svc, Guid boardId, Guid todoId, bool isCompleted)
@@ -264,6 +274,14 @@ public class BoardTools
     {
         await svc.UpdateBoardTodoNotesAsync(boardId, todoId, notes);
         return "Board todo notes updated.";
+    }
+
+    [McpServerTool, Description("Set or clear the due date on a board-level todo. Pass null to clear it.")]
+    public static async Task<string> UpdateBoardTodoDueDate(IBoardService svc, Guid boardId, Guid todoId,
+        [Description("The new due date, or null to clear it.")] DateTime? dueDate)
+    {
+        await svc.UpdateBoardTodoDueDateAsync(boardId, todoId, dueDate);
+        return "Board todo due date updated.";
     }
 
     [McpServerTool, Description("Update the text of a board-level todo.")]

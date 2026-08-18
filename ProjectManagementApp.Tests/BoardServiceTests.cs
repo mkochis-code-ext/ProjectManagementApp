@@ -932,6 +932,121 @@ public class BoardServiceTests : IDisposable
         Assert.False(loaded.Todos[0].IsTodaysTodo);
     }
 
+    // ── Due Date ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task AddTodoAsync_SetsDueDate()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        var lane = await _service.AddLaneAsync(board.Id, "Lane");
+        var card = await _service.AddCardAsync(board.Id, lane.Id, "Card", "");
+        var due = new DateTime(2026, 8, 20);
+
+        var todo = await _service.AddTodoAsync(board.Id, lane.Id, card.Id, "Do this", dueDate: due);
+
+        Assert.Equal(due, todo.DueDate);
+
+        var loaded = await _service.GetBoardAsync(board.Id);
+        Assert.Equal(due, loaded!.Lanes[0].Cards[0].Todos[0].DueDate);
+    }
+
+    [Fact]
+    public async Task AddTodoAsync_DefaultsDueDateToNull()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        var lane = await _service.AddLaneAsync(board.Id, "Lane");
+        var card = await _service.AddCardAsync(board.Id, lane.Id, "Card", "");
+
+        var todo = await _service.AddTodoAsync(board.Id, lane.Id, card.Id, "No due date");
+
+        Assert.Null(todo.DueDate);
+    }
+
+    [Fact]
+    public async Task AddBoardTodoAsync_SetsDueDate()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        var due = new DateTime(2026, 8, 20);
+
+        var todo = await _service.AddBoardTodoAsync(board.Id, "Board task", dueDate: due);
+
+        Assert.Equal(due, todo.DueDate);
+
+        var loaded = await _service.GetBoardAsync(board.Id);
+        Assert.Equal(due, loaded!.Todos[0].DueDate);
+    }
+
+    [Fact]
+    public async Task UpdateTodoDueDateAsync_SetsAndClearsDueDate()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        var lane = await _service.AddLaneAsync(board.Id, "Lane");
+        var card = await _service.AddCardAsync(board.Id, lane.Id, "Card", "");
+        var todo = await _service.AddTodoAsync(board.Id, lane.Id, card.Id, "Do this");
+        var due = new DateTime(2026, 9, 1);
+
+        await _service.UpdateTodoDueDateAsync(board.Id, lane.Id, card.Id, todo.Id, due);
+        var afterSet = await _service.GetBoardAsync(board.Id);
+        Assert.Equal(due, afterSet!.Lanes[0].Cards[0].Todos[0].DueDate);
+
+        await _service.UpdateTodoDueDateAsync(board.Id, lane.Id, card.Id, todo.Id, null);
+        var afterClear = await _service.GetBoardAsync(board.Id);
+        Assert.Null(afterClear!.Lanes[0].Cards[0].Todos[0].DueDate);
+    }
+
+    [Fact]
+    public async Task UpdateTodoDueDateAsync_NoOp_WhenTodoNotFound()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        var lane = await _service.AddLaneAsync(board.Id, "Lane");
+        var card = await _service.AddCardAsync(board.Id, lane.Id, "Card", "");
+
+        await _service.UpdateTodoDueDateAsync(board.Id, lane.Id, card.Id, Guid.NewGuid(), new DateTime(2026, 9, 1));
+    }
+
+    [Fact]
+    public async Task UpdateBoardTodoDueDateAsync_SetsAndClearsDueDate()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        var todo = await _service.AddBoardTodoAsync(board.Id, "Board task");
+        var due = new DateTime(2026, 9, 1);
+
+        await _service.UpdateBoardTodoDueDateAsync(board.Id, todo.Id, due);
+        var afterSet = await _service.GetBoardAsync(board.Id);
+        Assert.Equal(due, afterSet!.Todos[0].DueDate);
+
+        await _service.UpdateBoardTodoDueDateAsync(board.Id, todo.Id, null);
+        var afterClear = await _service.GetBoardAsync(board.Id);
+        Assert.Null(afterClear!.Todos[0].DueDate);
+    }
+
+    [Fact]
+    public async Task UpdateBoardTodoDueDateAsync_NoOp_WhenTodoNotFound()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        await _service.UpdateBoardTodoDueDateAsync(board.Id, Guid.NewGuid(), new DateTime(2026, 9, 1));
+    }
+
+    [Fact]
+    public async Task DueDate_PersistsAcrossReload()
+    {
+        var board = await _service.CreateBoardAsync("Board");
+        var lane = await _service.AddLaneAsync(board.Id, "Lane");
+        var card = await _service.AddCardAsync(board.Id, lane.Id, "Card", "");
+        var due = new DateTime(2026, 8, 20);
+        await _service.AddTodoAsync(board.Id, lane.Id, card.Id, "Persist me", dueDate: due);
+
+        var service2 = new TestBoardService();
+        var field = typeof(BoardService).GetField("_filePath",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        field.SetValue(service2, _service.FilePath);
+
+        var loaded = await service2.GetBoardAsync(board.Id);
+        Assert.Equal(due, loaded!.Lanes[0].Cards[0].Todos[0].DueDate);
+
+        service2.Dispose();
+    }
+
     // ── Persistence round-trip ───────────────────────────────────
 
     [Fact]

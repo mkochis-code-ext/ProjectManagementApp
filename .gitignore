@@ -52,3 +52,6 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Local board data — never commit user/customer data (todos, contacts, notes)
+BoardCollection*.json

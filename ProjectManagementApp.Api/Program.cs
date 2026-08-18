@@ -144,7 +144,7 @@ boards.MapDelete("/{boardId:guid}/lanes/{laneId:guid}/cards/{cardId:guid}/contac
 // Card-level todos
 var cardTodos = "/{boardId:guid}/lanes/{laneId:guid}/cards/{cardId:guid}/todos";
 boards.MapPost(cardTodos, async (Guid boardId, Guid laneId, Guid cardId, TodoRequest req, BoardService svc) =>
-    Results.Ok(await svc.AddTodoAsync(boardId, laneId, cardId, req.Text, req.IsTodaysTodo, req.Notes)));
+    Results.Ok(await svc.AddTodoAsync(boardId, laneId, cardId, req.Text, req.IsTodaysTodo, req.Notes, req.DueDate)));
 boards.MapPut(cardTodos + "/{todoId:guid}/text", async (Guid boardId, Guid laneId, Guid cardId, Guid todoId, TextRequest req, BoardService svc) =>
 {
     await svc.UpdateTodoTextAsync(boardId, laneId, cardId, todoId, req.Text);
@@ -170,6 +170,11 @@ boards.MapPut(cardTodos + "/{todoId:guid}/notes", async (Guid boardId, Guid lane
     await svc.UpdateTodoNotesAsync(boardId, laneId, cardId, todoId, req.Notes);
     return Results.NoContent();
 });
+boards.MapPut(cardTodos + "/{todoId:guid}/duedate", async (Guid boardId, Guid laneId, Guid cardId, Guid todoId, DueDateRequest req, BoardService svc) =>
+{
+    await svc.UpdateTodoDueDateAsync(boardId, laneId, cardId, todoId, req.DueDate);
+    return Results.NoContent();
+});
 boards.MapPost(cardTodos + "/{todoId:guid}/links", async (Guid boardId, Guid laneId, Guid cardId, Guid todoId, LinkRequest req, BoardService svc) =>
     Results.Ok(await svc.AddTodoLinkAsync(boardId, laneId, cardId, todoId, req.Title, req.Url)));
 boards.MapDelete(cardTodos + "/{todoId:guid}/links/{linkId:guid}", async (Guid boardId, Guid laneId, Guid cardId, Guid todoId, Guid linkId, BoardService svc) =>
@@ -181,7 +186,7 @@ boards.MapDelete(cardTodos + "/{todoId:guid}/links/{linkId:guid}", async (Guid b
 // Board-level todos
 var boardTodos = "/{boardId:guid}/todos";
 boards.MapPost(boardTodos, async (Guid boardId, TodoRequest req, BoardService svc) =>
-    Results.Ok(await svc.AddBoardTodoAsync(boardId, req.Text, req.IsTodaysTodo, req.Notes)));
+    Results.Ok(await svc.AddBoardTodoAsync(boardId, req.Text, req.IsTodaysTodo, req.Notes, req.DueDate)));
 boards.MapPost(boardTodos + "/{todoId:guid}/completion", async (Guid boardId, Guid todoId, CompletionRequest req, BoardService svc) =>
 {
     await svc.SetBoardTodoCompletionAsync(boardId, todoId, req.IsCompleted);
@@ -200,6 +205,11 @@ boards.MapPost(boardTodos + "/{todoId:guid}/todays", async (Guid boardId, Guid t
 boards.MapPut(boardTodos + "/{todoId:guid}/notes", async (Guid boardId, Guid todoId, NotesRequest req, BoardService svc) =>
 {
     await svc.UpdateBoardTodoNotesAsync(boardId, todoId, req.Notes);
+    return Results.NoContent();
+});
+boards.MapPut(boardTodos + "/{todoId:guid}/duedate", async (Guid boardId, Guid todoId, DueDateRequest req, BoardService svc) =>
+{
+    await svc.UpdateBoardTodoDueDateAsync(boardId, todoId, req.DueDate);
     return Results.NoContent();
 });
 boards.MapPut(boardTodos + "/{todoId:guid}/text", async (Guid boardId, Guid todoId, TextRequest req, BoardService svc) =>
@@ -231,5 +241,6 @@ record NotesRequest(string Notes);
 record TextRequest(string Text);
 record LinkRequest(string Title, string Url);
 record ContactRequest(string Name, string Email);
-record TodoRequest(string Text, bool IsTodaysTodo = false, string Notes = "");
+record TodoRequest(string Text, bool IsTodaysTodo = false, string Notes = "", DateTime? DueDate = null);
 record TodaysTodoRequest(bool IsTodaysTodo);
+record DueDateRequest(DateTime? DueDate);

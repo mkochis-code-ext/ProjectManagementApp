@@ -49,20 +49,22 @@ public interface IBoardService
     Task<CardContact> AddCardContactAsync(Guid boardId, Guid laneId, Guid cardId, string name, string email);
     Task DeleteCardContactAsync(Guid boardId, Guid laneId, Guid cardId, Guid contactId);
 
-    Task<TodoItem> AddTodoAsync(Guid boardId, Guid laneId, Guid cardId, string text, bool isTodaysTodo = false, string notes = "");
+    Task<TodoItem> AddTodoAsync(Guid boardId, Guid laneId, Guid cardId, string text, bool isTodaysTodo = false, string notes = "", DateTime? dueDate = null);
     Task SetTodoCompletionAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, bool isCompleted);
     Task DeleteTodoAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId);
     Task SetTodaysTodoAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, bool isTodaysTodo);
     Task UpdateTodoNotesAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, string notes);
+    Task UpdateTodoDueDateAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, DateTime? dueDate);
     Task UpdateTodoTextAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, string text);
     Task<TodoLink> AddTodoLinkAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, string title, string url);
     Task DeleteTodoLinkAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, Guid linkId);
 
-    Task<TodoItem> AddBoardTodoAsync(Guid boardId, string text, bool isTodaysTodo = false, string notes = "");
+    Task<TodoItem> AddBoardTodoAsync(Guid boardId, string text, bool isTodaysTodo = false, string notes = "", DateTime? dueDate = null);
     Task SetBoardTodoCompletionAsync(Guid boardId, Guid todoId, bool isCompleted);
     Task DeleteBoardTodoAsync(Guid boardId, Guid todoId);
     Task SetBoardTodaysTodoAsync(Guid boardId, Guid todoId, bool isTodaysTodo);
     Task UpdateBoardTodoNotesAsync(Guid boardId, Guid todoId, string notes);
+    Task UpdateBoardTodoDueDateAsync(Guid boardId, Guid todoId, DateTime? dueDate);
     Task UpdateBoardTodoTextAsync(Guid boardId, Guid todoId, string text);
     Task<TodoLink> AddBoardTodoLinkAsync(Guid boardId, Guid todoId, string title, string url);
     Task DeleteBoardTodoLinkAsync(Guid boardId, Guid todoId, Guid linkId);

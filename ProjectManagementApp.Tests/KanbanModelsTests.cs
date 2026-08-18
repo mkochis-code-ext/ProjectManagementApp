@@ -133,6 +133,7 @@ public class KanbanModelsTests
         Assert.Equal(string.Empty, todo.Text);
         Assert.False(todo.IsCompleted);
         Assert.False(todo.IsTodaysTodo);
+        Assert.Null(todo.DueDate);
         Assert.True(todo.CreatedAt <= DateTime.UtcNow);
         Assert.Null(todo.CompletedAt);
         Assert.Equal(0, todo.Order);
@@ -158,6 +159,15 @@ public class KanbanModelsTests
 
         Assert.True(todo.IsCompleted);
         Assert.NotNull(todo.CompletedAt);
+    }
+
+    [Fact]
+    public void TodoItem_SetDueDate()
+    {
+        var due = new DateTime(2026, 8, 20);
+        var todo = new TodoItem { DueDate = due };
+
+        Assert.Equal(due, todo.DueDate);
     }
 
     [Fact]

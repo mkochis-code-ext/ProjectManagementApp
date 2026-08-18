@@ -124,8 +124,8 @@ public class BoardApiClient : IBoardService
         Delete($"api/boards/{boardId}/lanes/{laneId}/cards/{cardId}/contacts/{contactId}");
 
     // Card-level todos
-    public Task<TodoItem> AddTodoAsync(Guid boardId, Guid laneId, Guid cardId, string text, bool isTodaysTodo = false, string notes = "") =>
-        Post<TodoItem>($"api/boards/{boardId}/lanes/{laneId}/cards/{cardId}/todos", new { text, isTodaysTodo, notes });
+    public Task<TodoItem> AddTodoAsync(Guid boardId, Guid laneId, Guid cardId, string text, bool isTodaysTodo = false, string notes = "", DateTime? dueDate = null) =>
+        Post<TodoItem>($"api/boards/{boardId}/lanes/{laneId}/cards/{cardId}/todos", new { text, isTodaysTodo, notes, dueDate });
 
     public Task SetTodoCompletionAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, bool isCompleted) =>
         Post($"api/boards/{boardId}/lanes/{laneId}/cards/{cardId}/todos/{todoId}/completion", new { isCompleted });
@@ -139,6 +139,9 @@ public class BoardApiClient : IBoardService
     public Task UpdateTodoNotesAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, string notes) =>
         Put($"api/boards/{boardId}/lanes/{laneId}/cards/{cardId}/todos/{todoId}/notes", new { notes });
 
+    public Task UpdateTodoDueDateAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, DateTime? dueDate) =>
+        Put($"api/boards/{boardId}/lanes/{laneId}/cards/{cardId}/todos/{todoId}/duedate", new { dueDate });
+
     public Task UpdateTodoTextAsync(Guid boardId, Guid laneId, Guid cardId, Guid todoId, string text) =>
         Put($"api/boards/{boardId}/lanes/{laneId}/cards/{cardId}/todos/{todoId}/text", new { text });
 
@@ -149,8 +152,8 @@ public class BoardApiClient : IBoardService
         Delete($"api/boards/{boardId}/lanes/{laneId}/cards/{cardId}/todos/{todoId}/links/{linkId}");
 
     // Board-level todos
-    public Task<TodoItem> AddBoardTodoAsync(Guid boardId, string text, bool isTodaysTodo = false, string notes = "") =>
-        Post<TodoItem>($"api/boards/{boardId}/todos", new { text, isTodaysTodo, notes });
+    public Task<TodoItem> AddBoardTodoAsync(Guid boardId, string text, bool isTodaysTodo = false, string notes = "", DateTime? dueDate = null) =>
+        Post<TodoItem>($"api/boards/{boardId}/todos", new { text, isTodaysTodo, notes, dueDate });
 
     public Task SetBoardTodoCompletionAsync(Guid boardId, Guid todoId, bool isCompleted) =>
         Post($"api/boards/{boardId}/todos/{todoId}/completion", new { isCompleted });
@@ -163,6 +166,9 @@ public class BoardApiClient : IBoardService
 
     public Task UpdateBoardTodoNotesAsync(Guid boardId, Guid todoId, string notes) =>
         Put($"api/boards/{boardId}/todos/{todoId}/notes", new { notes });
+
+    public Task UpdateBoardTodoDueDateAsync(Guid boardId, Guid todoId, DateTime? dueDate) =>
+        Put($"api/boards/{boardId}/todos/{todoId}/duedate", new { dueDate });
 
     public Task UpdateBoardTodoTextAsync(Guid boardId, Guid todoId, string text) =>
         Put($"api/boards/{boardId}/todos/{todoId}/text", new { text });
