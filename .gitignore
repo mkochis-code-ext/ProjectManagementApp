@@ -55,3 +55,29 @@ nunit-*.xml
 
 # Local board data — never commit user/customer data (todos, contacts, notes)
 BoardCollection*.json
+
+# Local credentials and private key material; keep sanitized env templates trackable
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+!.env.*.example
+!.env.*.sample
+!.env.*.template
+secrets.json
+credentials.json
+*.key
+*.pem
+*.pfx
+*.p12
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+*.pubxml
+*.pubxml.user
+*.publishsettings
+
+# Generated local diagnostic databases, sidecars, and locks
+/msxi-snap-data/diagnostics/
