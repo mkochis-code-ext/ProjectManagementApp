@@ -88,6 +88,30 @@ public class BoardService : IBoardService
         }
     }
 
+    public async Task<string?> BackupCollectionAsync(CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (!File.Exists(_filePath)) return null;
+            var json = await File.ReadAllTextAsync(_filePath, ct);
+            if (JsonSerializer.Deserialize<BoardCollection>(json, _jsonOptions) is null)
+                throw new InvalidDataException("The board collection is invalid.");
+            var folder = Path.Combine(Path.GetDirectoryName(_filePath)!, "ArcFlow-Backups");
+            Directory.CreateDirectory(folder);
+            var fileName = $"BoardCollection-{DateTime.Now:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}.json";
+            var temporary = Path.Combine(folder, fileName + ".tmp");
+            try
+            {
+                await File.WriteAllTextAsync(temporary, json, ct);
+                File.Move(temporary, Path.Combine(folder, fileName));
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+            return fileName;
+        }
+        finally { _gate.Release(); }
+    }
+
     public async Task<List<Board>> GetAllBoardsAsync()
     {
         await LoadCollectionAsync();

@@ -12,6 +12,26 @@ The solution is split into three cooperating services plus a shared class librar
 
 Both the Web UI and MCP server access data exclusively through the API over HTTP, so there is never more than one process writing to the JSON file.
 
+## CSA Dashboard managed hosting
+
+CSA Dashboard can package/start the compiled API and MCP without the standalone Web
+UI, bound to `127.0.0.1:5180` and `127.0.0.1:5190`. It verifies the local listener
+and the protocol identity at `/_arcflow/identity`, then reads the existing health
+endpoint. Missing services start API first, with no PowerShell window or dev build.
+Older services lacking the identity protocol are reported as conflicts, never killed.
+
+The Dashboard stops only its owned processes when its last window closes. Each
+gets a fresh in-memory/environment key and instance ID; `/_arcflow/shutdown`
+requires that key, instance, PID, loopback peer and exact local Host, and refuses
+browser Origin requests. Independently started instances have no usable owner key.
+These metadata routes contain no task data, collection paths or credentials.
+No Windows service, automatic task mutation or board-file migration is introduced.
+
+Dashboard publishing builds API/MCP using existing cached dependencies with
+`--no-restore` and copies complete runtime output into `publish\arcflow\api` and
+`publish\arcflow\mcp`. No package is downloaded, and development validation never
+starts listeners. Existing standalone launch commands remain available.
+
 ## Features
 
 - **Multiple boards** with customizable labels for lanes, cards, and todos
@@ -80,6 +100,11 @@ graph LR
 
 - **`ProjectManagementApp.Core`** — shared class library with the data models (`KanbanModels`, `SearchModels`) and services: `BoardService` (JSON file persistence, used only by the API), `IBoardService`, and `BoardApiClient` (HTTP client implementation used by Web and MCP).
 - **`ProjectManagementApp.Api`** — the single writer of `BoardCollection.json`. Exposes CRUD and search endpoints under `/api/boards` and a `/health` endpoint with a data-file health check.
+- The API serializes whole `/api/boards` requests so simultaneous Web, MCP and
+  native CSA Dashboard clients cannot replace an in-flight service collection.
+  `POST /api/boards/backup` creates an atomic, uniquely named backup through the
+  owning API and returns `{ "fileName": "BoardCollection-...json" }`; it returns
+  404 if no collection exists. This endpoint accepts no destination path.
 - **`ProjectManagementApp.Mcp`** — exposes the full board feature set (list/search/create/update/move/delete for boards, lanes, cards, todos, and links) as MCP tools for AI agents. Proxies all data access through the API and reports API reachability on its `/health` endpoint.
 - **`ProjectManagementApp`** (Web) — the Blazor Server UI. Includes a health status dashboard that monitors the API and MCP `/health` endpoints.
 
@@ -168,6 +193,9 @@ The file uses **camelCase** property naming and is written with indented formatt
 ### Backup
 
 The app includes a backup button that copies `BoardCollection.json` to a timestamped file in the same Documents folder.
+The current backup destination is `ArcFlow-Backups` under that Documents folder.
+Native CSA Dashboard Todo uses the API backup endpoint rather than reading or
+writing the collection file itself.
 
 ## Project Structure
 

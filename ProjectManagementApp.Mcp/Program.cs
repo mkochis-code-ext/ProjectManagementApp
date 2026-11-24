@@ -3,10 +3,12 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using ProjectManagementApp.Mcp;
 using ProjectManagementApp.Services;
+using ProjectManagementApp;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var apiBaseUrl = builder.Configuration["Endpoints:Api"] ?? "http://localhost:5180";
+var configuredApi = builder.Configuration["Endpoints:Api"] ?? "http://localhost:5180";
+var apiBaseUrl = RuntimeIdentity.CanonicalApi(configuredApi) ?? configuredApi;
 
 // All MCP tools access data through the API (the sole owner of the JSON file).
 builder.Services.AddHttpClient<IBoardService, BoardApiClient>(client =>
@@ -29,6 +31,8 @@ builder.Services.AddHealthChecks()
     .AddCheck<ApiHealthCheck>("api");
 
 var app = builder.Build();
+var runtime = new ProjectManagementApp.RuntimeIdentity("mcp", apiBaseUrl);
+app.MapArcFlowRuntime(runtime);
 
 app.MapMcp();
 

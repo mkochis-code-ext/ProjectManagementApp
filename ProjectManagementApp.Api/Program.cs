@@ -2,6 +2,7 @@ using ProjectManagementApp.Models;
 using ProjectManagementApp.Services;
 using ProjectManagementApp.Api;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using ProjectManagementApp;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,7 +13,25 @@ builder.Services.AddSingleton<BoardService>();
 builder.Services.AddHealthChecks()
     .AddCheck<BoardFileHealthCheck>("data-file");
 
+builder.Services.AddOpenApi();
+
 var app = builder.Build();
+var runtime = new ProjectManagementApp.RuntimeIdentity("api");
+app.MapArcFlowRuntime(runtime);
+
+// BoardService reloads and saves in separate steps; serialize complete requests so
+// concurrent Dashboard, Web and MCP clients cannot overwrite an in-flight edit.
+using var boardRequests = new SemaphoreSlim(1, 1);
+app.Use(async (context, next) =>
+{
+    if (!context.Request.Path.StartsWithSegments("/api/boards")) { await next(context); return; }
+    await boardRequests.WaitAsync(context.RequestAborted);
+    try { await next(context); }
+    finally { boardRequests.Release(); }
+});
+
+// Serves the generated OpenAPI (Swagger) definition at /openapi/v1.json
+app.MapOpenApi();
 
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
@@ -223,6 +242,12 @@ boards.MapDelete(boardTodos + "/{todoId:guid}/links/{linkId:guid}", async (Guid 
 {
     await svc.DeleteBoardTodoLinkAsync(boardId, todoId, linkId);
     return Results.NoContent();
+});
+
+app.MapPost("/api/boards/backup", async (BoardService svc, CancellationToken ct) =>
+{
+    var fileName = await svc.BackupCollectionAsync(ct);
+    return fileName is null ? Results.NotFound() : Results.Ok(new { fileName });
 });
 
 app.Run();

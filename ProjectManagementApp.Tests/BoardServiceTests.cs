@@ -43,6 +43,36 @@ public class BoardServiceTests : IDisposable
 
     public void Dispose() => _service.Dispose();
 
+    [Fact]
+    public async Task BackupCollectionAsync_MissingFileDoesNotCreateAnEmptyBackup()
+    {
+        Assert.Null(await _service.BackupCollectionAsync());
+        Assert.False(Directory.Exists(Path.Combine(Path.GetDirectoryName(_service.FilePath)!, "ArcFlow-Backups")));
+    }
+
+    [Fact]
+    public async Task BackupCollectionAsync_PreservesFileAndCreatesDistinctCopies()
+    {
+        await _service.CreateBoardAsync("Synthetic", "Lane", "Card", "Todo");
+        var original = await File.ReadAllTextAsync(_service.FilePath);
+        var first = await _service.BackupCollectionAsync();
+        var second = await _service.BackupCollectionAsync();
+        Assert.NotNull(first);
+        Assert.NotEqual(first, second);
+        var folder = Path.Combine(Path.GetDirectoryName(_service.FilePath)!, "ArcFlow-Backups");
+        Assert.Equal(original, await File.ReadAllTextAsync(Path.Combine(folder, first!)));
+        Assert.Equal(original, await File.ReadAllTextAsync(Path.Combine(folder, second!)));
+        Assert.Equal(original, await File.ReadAllTextAsync(_service.FilePath));
+    }
+
+    [Fact]
+    public async Task BackupCollectionAsync_RejectsInvalidCollectionWithoutCreatingBackup()
+    {
+        await File.WriteAllTextAsync(_service.FilePath, "null");
+        await Assert.ThrowsAsync<InvalidDataException>(() => _service.BackupCollectionAsync());
+        Assert.False(Directory.Exists(Path.Combine(Path.GetDirectoryName(_service.FilePath)!, "ArcFlow-Backups")));
+    }
+
     // ── Load / Save ──────────────────────────────────────────────
 
     [Fact]

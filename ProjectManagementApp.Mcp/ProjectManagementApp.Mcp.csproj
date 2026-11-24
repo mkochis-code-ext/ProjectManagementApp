@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ProjectManagementApp.Core\ProjectManagementApp.Core.csproj" />
+    <Compile Include="..\Runtime\RuntimeEndpoints.cs" Link="RuntimeEndpoints.cs" />
   </ItemGroup>
 
   <ItemGroup>
